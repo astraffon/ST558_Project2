@@ -3,7 +3,7 @@
 # Convert state-level monthly sports betting data into tidy format
 # The original data has been collected and prepared by Alfonso Straffon
 
-# Step 1 - Load Required Packages
+# Step 1: Load Required Packages
 
 # Load tidyverse for manipulating and tidying data
 library(tidyverse)
@@ -11,8 +11,7 @@ library(tidyverse)
 # Load readxl to import the original Excel workbook
 library(readxl)
 
-
-# Step 2 - Import the Original Excel Data
+# Step 2: Import the Original Excel Data
 
 # Import the Sports worksheet from our Excel database
 # col_names = FALSE keeps the first row as data
@@ -31,7 +30,8 @@ dim(sports_raw)
 glimpse(sports_raw[, 1:5])
 
 
-# Step 3 - Select Columns Through August 2026
+
+# Step 3: Select Columns Through August 2026
 
 # Columns 1 and 2 contain State and Metric
 # Columns 3 through 106 contain monthly observations
@@ -43,7 +43,7 @@ sports_data <- sports_raw |>
 dim(sports_data)
 
 
-# Step 4 - Assign Column Names
+# Step 4: Assign Column Names
 
 # The first row contains the actual column names
 # unlist() converts the first row from a tibble into a vector
@@ -54,7 +54,7 @@ names(sports_data) <- unlist(
 )
 
 
-# Step 5 - Remove Header Row and Rename Variables 
+# Step 5: Remove Header Row and Rename Variables 
 
 # Remove the first row because it was used for column names
 # Rename State and Metric using lowercase names
@@ -69,7 +69,7 @@ sports_data <- sports_data |>
 sports_data[1:10, 1:5]
 
 
-# Step 6 - Convert Excel Dates
+# Step 6: Convert Excel Dates
 
 # Columns 3 through 106 contain Excel date serial numbers
 # as.numeric() converts the column names to numbers
@@ -88,7 +88,7 @@ names(sports_data)[3:106] <- as.character(month_dates)
 names(sports_data)[1:6]
 
 
-# Step 7 - Convert Monthly Columns into Rows
+# Step 7: Convert Monthly Columns into Rows
 
 # pivot_longer() takes the monthly columns and stacks them into rows
 # Keep state and metric as identifying variables
@@ -108,7 +108,7 @@ sports_long |>
   head(6)
 
 
-# Step 8 - Convert Data Types
+# Step 8: Convert Data Types
 
 # Convert month from character to Date
 # Convert amount from character to numeric (double)
@@ -123,7 +123,7 @@ sports_long <- sports_long |>
 glimpse(sports_long)
 
 
-# Step 9 - Convert Financial Metrics into Columns
+# Step 9: Convert Financial Metrics into Columns
 
 # Remove rows with missing state or metric identifiers
 # These correspond to extra blank rows in the Excel worksheet
@@ -147,7 +147,7 @@ dim(sports_wide)
 glimpse(sports_wide)
 
 
-# Step 10 - Remove Months Before Reporting Began
+# Step 10: Remove Months Before Reporting Began
 
 # Keep a month if Handle, Revenue, OR Taxes is not missing
 # The | symbol represents the logical OR operator
@@ -171,7 +171,7 @@ dim(sports_clean)
 head(sports_clean, 10)
 
 
-# Step 11 - Rename Financial Variables
+# Step 11: Rename Financial Variables
 
 # Use lowercase names and underscores instead of spaces
 # Backticks are required for original names containing spaces
@@ -194,7 +194,7 @@ sports_clean <- sports_clean |>
 names(sports_clean)
 
 
-# Step 12 - Calculate Hold Percentages
+# Step 12: Calculate Hold Percentages
 
 # Hold percentage = Revenue / Handle * 100
 # Calculate hold separately for total, mobile, and retail
@@ -237,7 +237,90 @@ sports_clean |>
   ) |>
   head(10)
 
-# Step 13 - Export the Clean Dataset
+
+# Step 13: Prepare Mobile and Retail Handle and Revenue Values
+
+# Some states report only one channel of sports betting
+# For example, Mississippi reports retail only,
+# while Oregon and North Carolina report mobile only
+#
+# In the original database, an unused channel may be NA or zero
+# We should not automatically convert every NA to zero
+#
+# If one channel equals the total, we can infer that
+# the other channel contributed zero
+#
+# Apply this logic separately to Handle and Revenue
+# Preserve the original financial variables
+
+sports_clean <- sports_clean |>
+  mutate(
+    
+    # Prepare Mobile Handle for channel comparisons
+    mobile_for_split = case_when(
+      !is.na(handle_mobile) ~ handle_mobile,
+      !is.na(handle_retail) &
+        abs(handle - handle_retail) < 0.01 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    # Prepare Retail Handle for channel comparisons
+    retail_for_split = case_when(
+      !is.na(handle_retail) ~ handle_retail,
+      !is.na(handle_mobile) &
+        abs(handle - handle_mobile) < 0.01 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    # Prepare Mobile Revenue for channel comparisons
+    revenue_mobile_for_split = case_when(
+      !is.na(revenue_mobile) ~ revenue_mobile,
+      !is.na(revenue_retail) &
+        abs(revenue - revenue_retail) < 0.01 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    # Prepare Retail Revenue for channel comparisons
+    revenue_retail_for_split = case_when(
+      !is.na(revenue_retail) ~ revenue_retail,
+      !is.na(revenue_mobile) &
+        abs(revenue - revenue_mobile) < 0.01 ~ 0,
+      TRUE ~ NA_real_
+    )
+  )
+
+# case_when() evaluates conditions in order
+# First, use the actual reported value when available
+# Second, infer zero if the other channel equals the total
+# Otherwise, preserve the missing value as NA
+#
+# abs() calculates the absolute difference
+# The 0.01 tolerance allows for small rounding differences
+# Negative revenue values are preserved
+
+
+# Inspect the adjusted Handle and Revenue variables
+# Compare the original values with our derived variables
+
+sports_clean |>
+  filter(
+    state %in% c("MS", "OR", "NC"),
+    lubridate::year(month) == 2025
+  ) |>
+  select(
+    state,
+    month,
+    handle,
+    mobile_for_split,
+    retail_for_split,
+    revenue,
+    revenue_mobile_for_split,
+    revenue_retail_for_split
+  ) |>
+  head(12)
+
+
+# Step 14: Export the Clean Dataset
 
 # Save the tidied dataset as a CSV file
 # write_csv() is part of the readr package in tidyverse
