@@ -702,3 +702,65 @@ ggplot(
   )
 
 
+# Step 13: Top 10 States by Sports Betting Taxes per Capita
+
+# Use the annual tax and population data created in Step 12
+# Select 2025 because it is the most recent complete calendar year
+# Only include states with 12 months of reported taxes
+# !is.na() excludes missing per-capita tax values
+#
+# slice_max() selects the observations with the largest values
+# order_by specifies the variable used for ranking
+# n = 10 selects the 10 highest-ranking states
+# with_ties = FALSE ensures exactly 10 states are selected
+
+top_tax_states <- tax_heatmap_data |>
+  filter(
+    year_label == "2025",
+    months_reported == 12,
+    !is.na(taxes_per_capita)
+  ) |>
+  slice_max(
+    order_by = taxes_per_capita,
+    n = 10,
+    with_ties = FALSE
+  )
+
+# Inspect the top 10 states and their taxes per capita
+top_tax_states |>
+  select(state, year_label, total_taxes, population, taxes_per_capita) |>
+  arrange(desc(taxes_per_capita))
+
+
+# Create a horizontal bar chart
+#
+# ggplot() initializes the graph
+# aes() maps state to the x-axis and taxes per capita to the y-axis
+# reorder() arranges states according to their taxes per capita
+# geom_col() creates bars using the actual numerical values
+# coord_flip() switches the axes to make the bars horizontal
+# scale_y_continuous() formats the values as dollars
+# labs() adds chart and axis labels
+# theme_minimal() applies a clean visual style
+
+ggplot(
+  data = top_tax_states,
+  aes(
+    x = reorder(state, taxes_per_capita),
+    y = taxes_per_capita
+  )
+) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::label_dollar()
+  ) +
+  labs(
+    title = "Top 10 States by Sports Betting Taxes per Capita",
+    subtitle = "Calendar Year 2025",
+    x = "State",
+    y = "Annual Taxes per Resident ($)",
+    caption = "Includes states with 12 reported months of taxes in 2025."
+  ) +
+  theme_minimal()
+
