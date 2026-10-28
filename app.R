@@ -1,28 +1,18 @@
 
 # ST558 Project 2 - U.S. Sports Betting Explorer
-# Interactive application for state-level sports betting data
 
-
-# Step 1: Load Required Packages and Data
-
+# Step 1: Load packages and data
 library(shiny)
 library(tidyverse)
 library(DT)
 library(plotly)
 
-# Read in the cleaned sports betting data
-sports <- read_csv(
-  "data/sports_betting_clean.csv",
-  show_col_types = FALSE
-)
+sports <- readr::read_csv("data/sports_betting_clean.csv", show_col_types = FALSE) |>
+  mutate(month = as.Date(month))
 
-# Keep all columns for analysis, but omit split-adjustment columns from exports
-sports_download <- sports |>
-  select(-ends_with("_for_split"))
-
+sports_download <- sports |> select(-ends_with("_for_split"))
 state_choices <- sort(unique(sports$state))
 
-# Variable names displayed in the dropdowns
 numeric_vars <- c(
   "Total Handle ($)" = "handle",
   "Mobile Handle ($)" = "handle_mobile",
@@ -38,17 +28,36 @@ numeric_vars <- c(
   "Retail Hold (%)" = "hold_retail"
 )
 
+hold_vars <- c("hold_total", "hold_mobile", "hold_retail")
 
-# Step 2: Identify Reporting Periods
+period_choices <- c(
+  "Monthly" = "month",
+  "Calendar Quarter" = "quarter",
+  "Calendar Year" = "year",
+  "Trailing 3 Months (T3M)" = "t3m",
+  "Trailing 12 Months (TTM)" = "ttm",
+  "Year-to-Date (YTD)" = "ytd"
+)
 
-# Find the first month with positive activity for a selected channel
-# Return NA if no positive handle was reported
+period_labels <- c(
+  month = "Monthly",
+  quarter = "Quarterly",
+  year = "Annual",
+  t3m = "Trailing 3 Months",
+  ttm = "Trailing 12 Months",
+  ytd = "YTD"
+)
+
+
+# Step 2: Helper functions
+
+# First positive activity for a selected handle channel
 first_positive_month <- function(selected_state, selected_var) {
   
   dates <- sports |>
     filter(
       state == selected_state,
-      !is.na(.data[[selected_var]]),
+      is.finite(.data[[selected_var]]),
       .data[[selected_var]] > 0
     ) |>
     pull(month)
@@ -61,92 +70,114 @@ first_positive_month <- function(selected_state, selected_var) {
 }
 
 
-# Determine the first active month for each state and variable
-# Total, mobile, and retail have independent starting dates
-# Keep zeros and negative values after the starting month
-get_active_series <- function(selected_state, selected_var) {
+# Determine when a selected variable first becomes active
+first_active_month <- function(selected_state, selected_var) {
   
-  state_data <- sports |>
+  data <- sports |>
     filter(state == selected_state) |>
     arrange(month)
   
-  if (nrow(state_data) == 0) {
-    return(tibble(month = as.Date(character()), value = numeric()))
+  if (nrow(data) == 0) {
+    return(as.Date(NA))
   }
   
-  total_active <- !is.na(state_data$handle) & state_data$handle > 0
-  mobile_active <- !is.na(state_data$handle_mobile) & state_data$handle_mobile > 0
-  retail_active <- !is.na(state_data$handle_retail) & state_data$handle_retail > 0
+  positive <- function(var) {
+    is.finite(data[[var]]) & data[[var]] > 0
+  }
   
-  selected_values <- state_data[[selected_var]]
-  nonzero_value <- is.finite(selected_values) & selected_values != 0
+  values <- data[[selected_var]]
+  nonzero <- is.finite(values) & values != 0
   
-  # Choose the activity rule for the selected variable
   active <- switch(
     selected_var,
-    handle = total_active,
-    handle_mobile = mobile_active,
-    handle_retail = retail_active,
-    revenue = total_active | nonzero_value,
-    revenue_mobile = mobile_active | nonzero_value,
-    revenue_retail = retail_active | nonzero_value,
-    hold_total = total_active,
-    hold_mobile = mobile_active,
-    hold_retail = retail_active,
-    nonzero_value
+    
+    handle = positive("handle"),
+    handle_mobile = positive("handle_mobile"),
+    handle_retail = positive("handle_retail"),
+    
+    revenue = positive("handle") | nonzero,
+    revenue_mobile = positive("handle_mobile") | nonzero,
+    revenue_retail = positive("handle_retail") | nonzero,
+    
+    hold_total = positive("handle"),
+    hold_mobile = positive("handle_mobile"),
+    hold_retail = positive("handle_retail"),
+    
+    nonzero
   )
   
-  active <- active & is.finite(selected_values)
+  active <- active & is.finite(values)
   
   if (!any(active)) {
-    return(tibble(month = as.Date(character()), value = numeric()))
+    return(as.Date(NA))
   }
   
-  first_month <- min(state_data$month[active])
-  
-  state_data |>
-    filter(
-      month >= first_month,
-      is.finite(.data[[selected_var]])
-    ) |>
-    transmute(month, value = .data[[selected_var]])
+  min(data$month[active])
 }
 
 
-# Create a range slider using the currently selected states and years
+# Exclude prelaunch observations
+# Retain true zeros and negative values thereafter
+get_active_series <- function(selected_state, selected_var) {
+  
+  start <- first_active_month(
+    selected_state,
+    selected_var
+  )
+  
+  if (is.na(start)) {
+    return(tibble(
+      month = as.Date(character()),
+      value = numeric()
+    ))
+  }
+  
+  sports |>
+    filter(
+      state == selected_state,
+      month >= start,
+      is.finite(.data[[selected_var]])
+    ) |>
+    transmute(
+      month,
+      value = .data[[selected_var]]
+    ) |>
+    arrange(month)
+}
+
+
+# Dynamic numerical slider for the Data & Summaries filters
 make_numeric_slider <- function(selected_var, slider_id, data) {
   
   values <- data[[selected_var]]
   values <- values[is.finite(values)]
   
   if (length(values) == 0) {
-    return(helpText("No reported values for this selection."))
+    return(helpText("No values for these selections."))
   }
   
-  is_hold <- selected_var %in% c(
-    "hold_total", "hold_mobile", "hold_retail"
-  )
+  is_hold <- selected_var %in% hold_vars
   
   if (is_hold) {
-    lower <- floor(min(values) * 100) / 100
-    upper <- ceiling(max(values) * 100) / 100
+    lo <- floor(min(values) * 100) / 100
+    hi <- ceiling(max(values) * 100) / 100
     step_size <- 0.01
   } else {
-    lower <- floor(min(values))
-    upper <- ceiling(max(values))
-    step_size <- max(1, round((upper - lower) / 500))
+    lo <- floor(min(values))
+    hi <- ceiling(max(values))
+    step_size <- max(1, round((hi - lo) / 500))
   }
   
-  if (lower == upper) {
-    upper <- lower + step_size
+  if (lo == hi) {
+    hi <- lo + step_size
   }
   
   sliderInput(
     inputId = slider_id,
     label = "Value Range",
-    min = lower,
-    max = upper,
-    value = c(lower, upper),
+    min = lo,
+    max = hi,
+    value = c(lo, hi),
     step = step_size,
     pre = if (is_hold) NULL else "$",
     post = if (is_hold) "%" else NULL,
@@ -156,153 +187,560 @@ make_numeric_slider <- function(selected_var, slider_id, data) {
 }
 
 
-# Step 3: Define the User Interface (UI)
+# Exact values override slider endpoints
+get_filter_limits <- function(slider_limits, min_text, max_text) {
+  
+  if (length(slider_limits) != 2) {
+    return(NULL)
+  }
+  
+  parse_bound <- function(x) {
+    
+    if (is.null(x) || !nzchar(trimws(x))) {
+      return(NA_real_)
+    }
+    
+    suppressWarnings(
+      as.numeric(gsub("[,$%[:space:]]", "", x))
+    )
+  }
+  
+  lo <- parse_bound(min_text)
+  hi <- parse_bound(max_text)
+  
+  bad_min <- !is.null(min_text) &&
+    nzchar(trimws(min_text)) &&
+    !is.finite(lo)
+  
+  bad_max <- !is.null(max_text) &&
+    nzchar(trimws(max_text)) &&
+    !is.finite(hi)
+  
+  if (bad_min || bad_max) {
+    return(NULL)
+  }
+  
+  limits <- slider_limits
+  
+  if (is.finite(lo)) {
+    limits[1] <- lo
+  }
+  
+  if (is.finite(hi)) {
+    limits[2] <- hi
+  }
+  
+  if (limits[1] > limits[2]) {
+    return(NULL)
+  }
+  
+  limits
+}
+
+
+# Convert date to the beginning of its reporting period
+period_floor <- function(date, mode) {
+  
+  unit <- if (mode == "year") {
+    "year"
+  } else if (mode == "quarter") {
+    "quarter"
+  } else {
+    "month"
+  }
+  
+  lubridate::floor_date(as.Date(date), unit)
+}
+
+
+# Format reporting periods
+format_period <- function(date, mode) {
+  
+  date <- as.Date(date, origin = "1970-01-01")
+  
+  if (mode == "year") {
+    return(format(date, "%Y"))
+  }
+  
+  if (mode == "quarter") {
+    return(paste0(
+      lubridate::year(date),
+      " Q",
+      lubridate::quarter(date)
+    ))
+  }
+  
+  format(date, "%b %Y")
+}
+
+
+# Build monthly, quarterly, annual, rolling, or YTD values
+# Charts use the original dataset, not Data & Summaries filters
+get_chart_series <- function(
+    selected_state,
+    selected_var,
+    chart_period
+) {
+  
+  raw <- get_active_series(
+    selected_state,
+    selected_var
+  )
+  
+  empty <- tibble(
+    period = as.Date(character()),
+    value = numeric()
+  )
+  
+  if (nrow(raw) == 0) {
+    return(empty)
+  }
+  
+  # Monthly values retain their original reported amounts
+  if (chart_period == "month") {
+    
+    return(raw |>
+             transmute(
+               period = month,
+               value
+             ))
+  }
+  
+  is_hold <- selected_var %in% hold_vars
+  
+  # For aggregate hold, use revenue divided by handle
+  if (is_hold) {
+    
+    pair <- switch(
+      selected_var,
+      
+      hold_total = c("revenue", "handle"),
+      hold_mobile = c("revenue_mobile", "handle_mobile"),
+      hold_retail = c("revenue_retail", "handle_retail")
+    )
+    
+    components <- sports |>
+      filter(state == selected_state) |>
+      transmute(
+        month,
+        rev = .data[[pair[1]]],
+        hdl = .data[[pair[2]]]
+      )
+    
+    raw <- raw |>
+      left_join(components, by = "month")
+  }
+  
+  
+  # Aggregate a full window of reporting months
+  window_value <- function(anchor, months) {
+    
+    observed <- raw |>
+      filter(month %in% months)
+    
+    # Require all constituent months
+    if (nrow(observed) != length(months)) {
+      
+      return(tibble(
+        period = as.Date(anchor),
+        value = NA_real_
+      ))
+    }
+    
+    if (is_hold) {
+      
+      if (
+        !all(is.finite(observed$rev)) ||
+        !all(is.finite(observed$hdl))
+      ) {
+        
+        amount <- NA_real_
+        
+      } else {
+        
+        denominator <- sum(observed$hdl)
+        
+        amount <- if (denominator > 0) {
+          100 * sum(observed$rev) / denominator
+        } else {
+          NA_real_
+        }
+      }
+      
+    } else {
+      
+      amount <- sum(observed$value)
+    }
+    
+    tibble(
+      period = as.Date(anchor),
+      value = amount
+    )
+  }
+  
+  
+  # Calendar quarters and calendar years
+  if (chart_period %in% c("quarter", "year")) {
+    
+    unit <- if (chart_period == "quarter") {
+      "quarter"
+    } else {
+      "year"
+    }
+    
+    count <- if (chart_period == "quarter") 3 else 12
+    
+    starts <- sort(unique(
+      lubridate::floor_date(raw$month, unit)
+    ))
+    
+    return(
+      purrr::map_dfr(starts, function(start) {
+        
+        months <- seq(
+          start,
+          by = "month",
+          length.out = count
+        )
+        
+        window_value(start, months)
+      })
+    )
+  }
+  
+  
+  # Trailing 3M, Trailing 12M, and YTD
+  # Use base R date sequences to avoid lubridate::months()
+  ends <- seq(
+    min(raw$month),
+    max(raw$month),
+    by = "month"
+  )
+  
+  purrr::map_dfr(ends, function(end) {
+    
+    first <- switch(
+      chart_period,
+      
+      # Three months including the current month
+      t3m = seq(
+        end,
+        by = "-1 month",
+        length.out = 3
+      )[3],
+      
+      # Twelve months including the current month
+      ttm = seq(
+        end,
+        by = "-1 month",
+        length.out = 12
+      )[12],
+      
+      # January through the current month
+      ytd = lubridate::floor_date(
+        end,
+        "year"
+      )
+    )
+    
+    window_value(
+      end,
+      seq(first, end, by = "month")
+    )
+  })
+}
+
+
+# Calculate change against the equivalent prior-year period
+add_yoy <- function(data, selected_var, metric) {
+  
+  if (nrow(data) == 0) {
+    return(data)
+  }
+  
+  prior <- data |>
+    transmute(
+      period = lubridate::`%m+%`(
+        period,
+        lubridate::years(1)
+      ),
+      prior_value = value
+    )
+  
+  data |>
+    left_join(prior, by = "period") |>
+    mutate(
+      value = case_when(
+        
+        !is.finite(value) |
+          !is.finite(prior_value) ~ NA_real_,
+        
+        selected_var %in% hold_vars |
+          metric == "change" ~ value - prior_value,
+        
+        prior_value > 0 ~
+          100 * (value / prior_value - 1),
+        
+        TRUE ~ NA_real_
+      )
+    ) |>
+    select(period, value)
+}
+
+
+# Select valid YoY calculation methods
+comparison_choices <- function(var) {
+  
+  if (var %in% hold_vars) {
+    
+    c(
+      "Reported Value" = "level",
+      "YoY Change (percentage points)" = "change"
+    )
+    
+  } else {
+    
+    c(
+      "Reported Value" = "level",
+      "YoY Dollar Change ($)" = "change",
+      "YoY Percentage Growth (%)" = "yoy"
+    )
+  }
+}
+
+
+# Step 3: Define the UI
 
 ui <- fluidPage(
   
   titlePanel("U.S. Sports Betting Explorer"),
   
-  # Main tabs for the application
   tabsetPanel(
     
     # About tab
     tabPanel(
       "About",
+      
       h3("About This Application"),
+      
       p(
-        "Explore historical U.S. sports betting data, including",
-        "handle, revenue, taxes, and hold percentages."
+        "Explore historical U.S. sports betting data,",
+        "including handle, revenue, taxes, and hold percentages."
       ),
+      
       p(
         "The dataset contains monthly state-level observations",
         "from 2018 through August 2026."
       ),
+      
       p(
-        "Select states, numerical variables, and a reporting",
-        "period to examine correlations between monthly observations."
+        "Data & Summaries has shared filters for the data",
+        "table and numerical summaries."
+      ),
+      
+      p(
+        "Correlation and Time Series have independent controls",
+        "under Data Exploration."
       )
     ),
     
-    # Data and summaries share one set of filters
+    
+    # Data Table and Numerical Summaries share these filters
     tabPanel(
       "Data & Summaries",
       
       sidebarLayout(
+        
         sidebarPanel(
+          
           h3("Dataset Filters"),
           
-          # Categorical filters: state and reporting year
+          # Categorical filter 1
           selectizeInput(
-            inputId = "filter_states",
-            label = "States",
-            choices = c("All States" = "ALL", state_choices),
+            "filter_states",
+            "States",
+            choices = c(
+              "All States" = "ALL",
+              state_choices
+            ),
             selected = "ALL",
             multiple = TRUE
           ),
+          
+          # Categorical filter 2
           selectizeInput(
-            inputId = "filter_years",
-            label = "Reporting Years",
+            "filter_years",
+            "Reporting Years",
             choices = c(
               "All Years" = "ALL",
-              as.character(sort(unique(lubridate::year(sports$month))))
+              as.character(sort(unique(
+                lubridate::year(sports$month)
+              )))
             ),
             selected = "ALL",
             multiple = TRUE
           ),
+          
           helpText(
-            "Remove 'All States' or 'All Years' to select specific categories."
+            "Remove 'All States' or 'All Years' to select",
+            "specific values."
           ),
           
-          # First optional numerical filter
+          
+          # Numerical Filter 1
           h4("Numerical Filter 1"),
-          checkboxInput("filter_use_num1", "Enable Filter 1", FALSE),
+          
+          checkboxInput(
+            "filter_use_num1",
+            "Enable Filter 1",
+            FALSE
+          ),
+          
           conditionalPanel(
             condition = "input.filter_use_num1",
+            
             selectInput(
-              inputId = "filter_num1", label = "Variable",
-              choices = numeric_vars, selected = "handle"
+              "filter_num1",
+              "Variable",
+              numeric_vars,
+              selected = "handle"
             ),
+            
             uiOutput("filter_slider1"),
+            
             fluidRow(
-              column(6, textInput(
-                "filter_min1", "Exact minimum (optional)",
-                value = "", placeholder = "e.g. 0"
-              )),
-              column(6, textInput(
-                "filter_max1", "Exact maximum (optional)",
-                value = "", placeholder = "e.g. 100000"
-              ))
+              
+              column(
+                6,
+                textInput(
+                  "filter_min1",
+                  "Exact minimum (optional)",
+                  value = ""
+                )
+              ),
+              
+              column(
+                6,
+                textInput(
+                  "filter_max1",
+                  "Exact maximum (optional)",
+                  value = ""
+                )
+              )
             )
           ),
           
-          # Second optional numerical filter
+          
+          # Numerical Filter 2
           h4("Numerical Filter 2"),
-          checkboxInput("filter_use_num2", "Enable Filter 2", FALSE),
+          
+          checkboxInput(
+            "filter_use_num2",
+            "Enable Filter 2",
+            FALSE
+          ),
+          
           conditionalPanel(
             condition = "input.filter_use_num2",
+            
             selectInput(
-              inputId = "filter_num2", label = "Variable",
-              choices = numeric_vars, selected = "revenue"
+              "filter_num2",
+              "Variable",
+              numeric_vars,
+              selected = "revenue"
             ),
+            
             uiOutput("filter_slider2"),
+            
             fluidRow(
-              column(6, textInput(
-                "filter_min2", "Exact minimum (optional)",
-                value = "", placeholder = "e.g. 0"
-              )),
-              column(6, textInput(
-                "filter_max2", "Exact maximum (optional)",
-                value = "", placeholder = "e.g. 100000"
-              ))
+              
+              column(
+                6,
+                textInput(
+                  "filter_min2",
+                  "Exact minimum (optional)",
+                  value = ""
+                )
+              ),
+              
+              column(
+                6,
+                textInput(
+                  "filter_max2",
+                  "Exact maximum (optional)",
+                  value = ""
+                )
+              )
             )
           ),
           
           helpText(
-            "Slider ranges follow the selected states and years.",
-            "Exact entries override the slider limits when supplied."
+            "Exact values override their corresponding slider endpoints."
           ),
-          actionButton("apply_filters", "Apply Filters"),
-          helpText("Both tables and the CSV update only after Apply Filters.")
+          
+          actionButton(
+            "apply_filters",
+            "Apply Filters"
+          ),
+          
+          helpText(
+            "Only the Data Table and Numerical Summaries",
+            "use these filters."
+          )
         ),
         
+        
         mainPanel(
+          
           h3("Data and Summary Statistics"),
+          
           textOutput("filter_summary"),
+          
           textOutput("applied_filter_description"),
           
-          # Switch between the table and summaries without losing the filters
           tabsetPanel(
+            
+            # Data Table
             tabPanel(
               "Data Table",
+              
               DT::DTOutput("sports_table"),
-              downloadButton("download_data", "Download Data (CSV)")
+              
+              downloadButton(
+                "download_data",
+                "Download Data (CSV)"
+              )
             ),
+            
+            
+            # Numerical Summaries
             tabPanel(
               "Numerical Summaries",
+              
               selectInput(
-                inputId = "summary_var",
-                label = "Summary Variable",
-                choices = numeric_vars,
+                "summary_var",
+                "Summary Variable",
+                numeric_vars,
                 selected = "handle"
               ),
               
-              # Choose between individual observations and monthly totals
               radioButtons(
-                inputId = "summary_mode",
-                label = "Calculation Method",
+                "summary_mode",
+                "Calculation Method",
                 choices = c(
                   "Individual state-month observations" = "individual",
                   "Combined monthly totals across states" = "monthly"
                 ),
                 selected = "individual"
               ),
+              
               helpText(
-                "Combined monthly totals are available for dollar variables only."
+                "Combined monthly totals are for dollar variables only."
               ),
               
               selectInput(
-                inputId = "summary_group",
-                label = "Group Results By",
+                "summary_group",
+                "Group Results By",
                 choices = c(
                   "State" = "state",
                   "Reporting Year" = "year",
@@ -311,8 +749,11 @@ ui <- fluidPage(
                 ),
                 selected = "state"
               ),
+              
               textOutput("summary_count"),
+              
               DT::DTOutput("summary_table"),
+              
               uiOutput("summary_note")
             )
           )
@@ -320,56 +761,72 @@ ui <- fluidPage(
       )
     ),
     
-    # Data Exploration tab
+    
+    # Data Exploration has independent chart controls
     tabPanel(
       "Data Exploration",
       
-      # Each analysis has its own tab and controls
       tabsetPanel(
         
-        # Correlation tab
+        # Correlation
         tabPanel(
           "Correlation",
           
           sidebarLayout(
             
             sidebarPanel(
+              
               h3("Correlation Analysis"),
               
-              # X-axis selections
               h4("X-Axis"),
-              selectizeInput(
-                inputId = "corr_state_x",
-                label = "State",
-                choices = state_choices,
+              
+              selectInput(
+                "corr_state_x",
+                "State",
+                state_choices,
                 selected = "NY"
               ),
-              selectizeInput(
-                inputId = "corr_x",
-                label = "Variable",
-                choices = numeric_vars,
+              
+              selectInput(
+                "corr_x",
+                "Variable",
+                numeric_vars,
                 selected = "handle"
               ),
               
-              # Y-axis selections
               h4("Y-Axis"),
-              selectizeInput(
-                inputId = "corr_state_y",
-                label = "State",
-                choices = state_choices,
+              
+              selectInput(
+                "corr_state_y",
+                "State",
+                state_choices,
                 selected = "NJ"
               ),
-              selectizeInput(
-                inputId = "corr_y",
-                label = "Variable",
-                choices = numeric_vars,
+              
+              selectInput(
+                "corr_y",
+                "Variable",
+                numeric_vars,
                 selected = "handle"
               ),
               
-              # Reporting period adjusts to the selected series
+              selectInput(
+                "corr_period",
+                "Reporting Period",
+                period_choices,
+                selected = "month"
+              ),
+              
+              selectInput(
+                "corr_view",
+                "Display Metric",
+                comparison_choices("handle"),
+                selected = "level"
+              ),
+              
               dateRangeInput(
-                inputId = "corr_dates",
-                label = "Reporting Period",
+                "corr_dates",
+                "Date Range",
                 start = min(sports$month),
                 end = max(sports$month),
                 min = min(sports$month),
@@ -377,49 +834,78 @@ ui <- fluidPage(
                 format = "M yyyy",
                 separator = " to "
               ),
+              
               textOutput("available_period"),
-              actionButton("run_corr", "Run Correlation")
+              
+              actionButton(
+                "run_corr",
+                "Run Correlation"
+              )
             ),
             
             mainPanel(
+              
               h3("Correlation Between Selected Variables"),
-              plotOutput("corr_plot", height = "450px"),
+              
+              plotOutput(
+                "corr_plot",
+                height = "450px"
+              ),
+              
               textOutput("corr_result"),
+              
               uiOutput("market_note")
             )
           )
         ),
         
-        # Time Series tab
+        
+        # Time Series
         tabPanel(
           "Time Series",
           
           sidebarLayout(
+            
             sidebarPanel(
+              
               h3("Time Series Analysis"),
               
               selectizeInput(
-                inputId = "ts_states",
-                label = "States",
-                choices = state_choices,
+                "ts_states",
+                "States",
+                state_choices,
                 selected = "NY",
                 multiple = TRUE
               ),
+              
               helpText(
-                "Click inside the box to add more states.",
-                "Multiple states can be selected."
+                "Click inside the box to add more states."
               ),
               
-              selectizeInput(
-                inputId = "ts_var",
-                label = "Variable",
-                choices = numeric_vars,
+              selectInput(
+                "ts_var",
+                "Variable",
+                numeric_vars,
                 selected = "handle"
               ),
               
+              selectInput(
+                "ts_period",
+                "Reporting Period",
+                period_choices,
+                selected = "month"
+              ),
+              
+              selectInput(
+                "ts_view",
+                "Display Metric",
+                comparison_choices("handle"),
+                selected = "level"
+              ),
+              
               dateRangeInput(
-                inputId = "ts_dates",
-                label = "Reporting Period",
+                "ts_dates",
+                "Date Range",
                 start = min(sports$month),
                 end = max(sports$month),
                 min = min(sports$month),
@@ -427,682 +913,74 @@ ui <- fluidPage(
                 format = "M yyyy",
                 separator = " to "
               ),
+              
               textOutput("ts_available_period"),
               
               selectInput(
-                inputId = "ts_display",
-                label = "Chart Layout",
-                choices = c("Shared scale", "Separate panels"),
+                "ts_display",
+                "Chart Layout",
+                c(
+                  "Shared scale",
+                  "Separate panels"
+                ),
                 selected = "Shared scale"
               ),
-              actionButton("run_ts", "Update Chart")
+              
+              actionButton(
+                "run_ts",
+                "Update Chart"
+              )
             ),
             
             mainPanel(
-              h3("Monthly Sports Betting Trends"),
-              plotlyOutput("ts_plot", height = "500px"),
+              
+              h3("Sports Betting Trends"),
+              
+              plotlyOutput(
+                "ts_plot",
+                height = "500px"
+              ),
+              
               uiOutput("ts_context")
             )
           )
         )
-        
-        # Additional analysis tabs will go here
       )
     )
   )
 )
 
 
-# Step 4: Define the Server
+# Step 4: Define the server
 
 server <- function(input, output, session) {
   
-  # Correlation Analysis
   
-  # Match the selected variables by calendar month
-  paired_months <- reactive({
-    
-    x_data <- get_active_series(
-      input$corr_state_x,
-      input$corr_x
-    ) |>
-      rename(x = value)
-    
-    y_data <- get_active_series(
-      input$corr_state_y,
-      input$corr_y
-    ) |>
-      rename(y = value)
-    
-    inner_join(x_data, y_data, by = "month") |>
-      arrange(month)
-  })
+  # Data & Summaries Filters
+  # These do not affect Correlation or Time Series
   
-  
-  # Update the reporting dates when the selected series change
-  observeEvent(paired_months(), {
-    
-    paired_data <- paired_months()
-    
-    if (nrow(paired_data) > 0) {
-      updateDateRangeInput(
-        session,
-        inputId = "corr_dates",
-        start = min(paired_data$month),
-        end = max(paired_data$month),
-        min = min(paired_data$month),
-        max = max(paired_data$month)
-      )
-    }
-  })
-  
-  
-  # Display the common reporting period
-  output$available_period <- renderText({
-    
-    paired_data <- paired_months()
-    
-    if (nrow(paired_data) == 0) {
-      return("No overlapping reported activity.")
-    }
-    
-    paste0(
-      "Available: ",
-      format(min(paired_data$month), "%b %Y"),
-      " - ",
-      format(max(paired_data$month), "%b %Y")
-    )
-  })
-  
-  
-  # Store the results from the last correlation run
-  corr_results <- reactiveValues(result = NULL)
-  
-  
-  # Run the correlation only when the button is clicked
-  observeEvent(input$run_corr, {
-    
-    req(input$corr_dates)
-    
-    start_month <- lubridate::floor_date(
-      input$corr_dates[1],
-      unit = "month"
-    )
-    
-    end_month <- lubridate::floor_date(
-      input$corr_dates[2],
-      unit = "month"
-    )
-    
-    paired_data <- paired_months()
-    
-    # Keep the selected dates within the available period
-    if (nrow(paired_data) > 0) {
-      start_month <- max(start_month, min(paired_data$month))
-      end_month <- min(end_month, max(paired_data$month))
-    }
-    
-    paired_data <- paired_data |>
-      filter(month >= start_month, month <= end_month)
-    
-    # Identify when mobile activity started in each state
-    mobile_start_x <- first_positive_month(
-      input$corr_state_x,
-      "handle_mobile"
-    )
-    
-    mobile_start_y <- first_positive_month(
-      input$corr_state_y,
-      "handle_mobile"
-    )
-    
-    # Classify each month by mobile-market activity
-    x_mobile <- if (is.na(mobile_start_x)) {
-      rep(FALSE, nrow(paired_data))
-    } else {
-      paired_data$month >= mobile_start_x
-    }
-    
-    y_mobile <- if (is.na(mobile_start_y)) {
-      rep(FALSE, nrow(paired_data))
-    } else {
-      paired_data$month >= mobile_start_y
-    }
-    
-    paired_data <- paired_data |>
-      mutate(
-        market_period = case_when(
-          x_mobile & y_mobile ~ "Both states mobile-active",
-          x_mobile | y_mobile ~ "One state mobile-active",
-          TRUE ~ "Neither state mobile-active"
-        ),
-        market_period = factor(
-          market_period,
-          levels = c(
-            "Neither state mobile-active",
-            "One state mobile-active",
-            "Both states mobile-active"
-          )
-        )
-      )
-    
-    # Save the selections and observations from this run
-    corr_results$result <- list(
-      data = paired_data,
-      state_x = input$corr_state_x,
-      state_y = input$corr_state_y,
-      var_x = input$corr_x,
-      var_y = input$corr_y,
-      start_month = start_month,
-      end_month = end_month
-    )
-  })
-  
-  
-  # Check the data before calculating correlation
-  corr_data <- reactive({
-    
-    result <- corr_results$result
-    
-    validate(
-      need(
-        !is.null(result),
-        "Select your inputs and click Run Correlation."
-      )
-    )
-    
-    validate(
-      need(
-        !(result$state_x == result$state_y &&
-            result$var_x == result$var_y),
-        "Select different states or different variables."
-      ),
-      need(
-        nrow(result$data) >= 3,
-        "Not enough matching months to calculate a correlation."
-      )
-    )
-    
-    validate(
-      need(
-        sd(result$data$x) > 0 &&
-          sd(result$data$y) > 0,
-        "Correlation cannot be calculated when a variable is constant."
-      )
-    )
-    
-    result
-  })
-  
-  
-  # Create the correlation scatterplot
-  output$corr_plot <- renderPlot({
-    
-    result <- corr_data()
-    x_label <- names(numeric_vars)[numeric_vars == result$var_x]
-    y_label <- names(numeric_vars)[numeric_vars == result$var_y]
-    
-    ggplot(result$data, aes(x = x, y = y)) +
-      geom_point(
-        aes(color = market_period),
-        size = 2.5,
-        alpha = 0.8
-      ) +
-      geom_smooth(
-        method = "lm",
-        se = FALSE,
-        color = "black"
-      ) +
-      scale_color_manual(
-        values = c(
-          "Neither state mobile-active" = "gray50",
-          "One state mobile-active" = "#E69F00",
-          "Both states mobile-active" = "#0072B2"
-        ),
-        name = "Market Period"
-      ) +
-      scale_x_continuous(
-        labels = scales::label_number(
-          scale_cut = scales::cut_short_scale()
-        )
-      ) +
-      scale_y_continuous(
-        labels = scales::label_number(
-          scale_cut = scales::cut_short_scale()
-        )
-      ) +
-      labs(
-        title = "Correlation Analysis",
-        subtitle = paste(result$state_x, "vs", result$state_y),
-        x = paste(result$state_x, x_label),
-        y = paste(result$state_y, y_label)
-      ) +
-      theme_gray()
-  })
-  
-  
-  # Calculate the Pearson correlation coefficient
-  output$corr_result <- renderText({
-    
-    result <- corr_data()
-    correlation <- cor(result$data$x, result$data$y)
-    
-    paste0(
-      "Pearson correlation (r): ", round(correlation, 3),
-      " | Matched months: ", nrow(result$data),
-      " | Period: ", format(result$start_month, "%b %Y"),
-      " - ", format(result$end_month, "%b %Y")
-    )
-  })
-  
-  
-  # Explain the selected states' reporting history
-  output$market_note <- renderUI({
-    
-    result <- corr_data()
-    
-    date_label <- function(date) {
-      if (is.na(date)) return("No positive activity reported")
-      format(date, "%b %Y")
-    }
-    
-    series_start <- function(selected_state, selected_var) {
-      series <- get_active_series(selected_state, selected_var)
-      if (nrow(series) == 0) return("Unavailable")
-      format(min(series$month), "%b %Y")
-    }
-    
-    state_note <- function(selected_state, selected_var) {
-      
-      variable_label <- names(numeric_vars)[numeric_vars == selected_var]
-      retail_start <- first_positive_month(
-        selected_state, "handle_retail"
-      )
-      mobile_start <- first_positive_month(
-        selected_state, "handle_mobile"
-      )
-      
-      paste0(
-        selected_state, " ", variable_label,
-        " data available since ",
-        series_start(selected_state, selected_var),
-        ". Retail activity: ", date_label(retail_start),
-        "; mobile activity: ", date_label(mobile_start), "."
-      )
-    }
-    
-    x_note <- state_note(result$state_x, result$var_x)
-    y_note <- state_note(result$state_y, result$var_y)
-    
-    total_amount_vars <- c(
-      "handle", "revenue", "taxable_revenue",
-      "taxes", "promos_dedux"
-    )
-    
-    scale_notes <- character()
-    
-    for (axis in c("x", "y")) {
-      
-      selected_state <- result[[paste0("state_", axis)]]
-      selected_var <- result[[paste0("var_", axis)]]
-      retail_start <- first_positive_month(
-        selected_state, "handle_retail"
-      )
-      mobile_start <- first_positive_month(
-        selected_state, "handle_mobile"
-      )
-      
-      if (
-        selected_var %in% total_amount_vars &&
-        !is.na(retail_start) &&
-        !is.na(mobile_start) &&
-        retail_start < mobile_start &&
-        result$start_month < mobile_start &&
-        result$end_month >= mobile_start
-      ) {
-        scale_notes <- c(
-          scale_notes,
-          paste0(
-            selected_state,
-            " reported retail activity before mobile activity began in ",
-            format(mobile_start, "%b %Y"),
-            ". Earlier total-dollar amounts may appear near zero ",
-            "relative to later mobile-era observations."
-          )
-        )
-      }
-    }
-    
-    tags$div(
-      style = paste(
-        "margin-top: 18px;",
-        "padding: 12px;",
-        "background-color: #f5f5f5;",
-        "border-radius: 5px;"
-      ),
-      tags$strong("Reporting Context"),
-      tags$p(paste0(
-        "Comparison: ", result$state_x, " ",
-        names(numeric_vars)[numeric_vars == result$var_x],
-        " vs ", result$state_y, " ",
-        names(numeric_vars)[numeric_vars == result$var_y], "."
-      )),
-      tags$p(x_note),
-      tags$p(y_note),
-      if (length(scale_notes) > 0) {
-        tags$p(
-          paste(unique(scale_notes), collapse = " "),
-          "Consider adjusting the reporting period when",
-          "comparing different stages of market development."
-        )
-      },
-      tags$p(
-        "Point colors indicate whether neither, one, or both",
-        "selected states had begun reporting positive mobile handle."
-      )
-    )
-  })
-  
-  
-  # Time Series Analysis
-  
-  # Collect the selected variable for each state
-  ts_series <- reactive({
-    
-    req(input$ts_var)
-    
-    if (length(input$ts_states) == 0) {
-      return(tibble(
-        month = as.Date(character()),
-        value = numeric(), state = character()
-      ))
-    }
-    
-    purrr::map_dfr(input$ts_states, function(selected_state) {
-      get_active_series(selected_state, input$ts_var) |>
-        mutate(state = selected_state)
-    }) |>
-      arrange(state, month)
-  })
-  
-  
-  # Display the available reporting dates
-  output$ts_available_period <- renderText({
-    series <- ts_series()
-    if (nrow(series) == 0) {
-      return("No reporting data for these selections.")
-    }
-    paste0(
-      "Available: ", format(min(series$month), "%b %Y"),
-      " - ", format(max(series$month), "%b %Y")
-    )
-  })
-  
-  
-  # Reset reporting dates when states or variables change
-  observeEvent(ts_series(), {
-    series <- ts_series()
-    if (nrow(series) > 0) {
-      updateDateRangeInput(
-        session,
-        inputId = "ts_dates",
-        start = min(series$month),
-        end = max(series$month),
-        min = min(series$month),
-        max = max(series$month)
-      )
-    }
-  })
-  
-  
-  # Update the chart only when the button is clicked
-  ts_results <- reactiveValues(result = NULL)
-  
-  observeEvent(input$run_ts, {
-    req(input$ts_dates)
-    req(length(input$ts_states) > 0)
-    
-    start_month <- lubridate::floor_date(input$ts_dates[1], "month")
-    end_month <- lubridate::floor_date(input$ts_dates[2], "month")
-    series <- ts_series()
-    
-    if (nrow(series) > 0) {
-      start_month <- max(start_month, min(series$month))
-      end_month <- min(end_month, max(series$month))
-    }
-    
-    chart_data <- series |>
-      filter(month >= start_month, month <= end_month)
-    
-    ts_results$result <- list(
-      data = chart_data,
-      states = input$ts_states,
-      variable = input$ts_var,
-      display = input$ts_display,
-      start_month = start_month,
-      end_month = end_month
-    )
-  })
-  
-  
-  # Check the time series data
-  ts_data <- reactive({
-    result <- ts_results$result
-    validate(
-      need(!is.null(result), "Select inputs and click Update Chart.")
-    )
-    validate(
-      need(nrow(result$data) > 0, "No data for this reporting period.")
-    )
-    result
-  })
-  
-  
-  # Interactive time series with exact values on hover
-  output$ts_plot <- renderPlotly({
-    result <- ts_data()
-    variable_label <- names(numeric_vars)[numeric_vars == result$variable]
-    is_hold <- result$variable %in% c(
-      "hold_total", "hold_mobile", "hold_retail"
-    )
-    
-    # Missing months are gaps, not zero observations
-    chart_data <- result$data |>
-      group_by(state) |>
-      complete(
-        month = seq(min(month), max(month), by = "month")
-      ) |>
-      ungroup() |>
-      mutate(
-        hover_value = if (is_hold) {
-          paste0(
-            formatC(value, format = "f", digits = 2, big.mark = ","),
-            "%"
-          )
-        } else {
-          paste0(
-            "$",
-            formatC(value, format = "f", digits = 2, big.mark = ",")
-          )
-        },
-        hover_text = paste0(
-          "State: ", state,
-          "<br>Month: ", format(month, "%b %Y"),
-          "<br>", variable_label, ": ", hover_value
-        )
-      )
-    
-    chart <- ggplot(
-      chart_data,
-      aes(
-        x = month, y = value, color = state,
-        group = state, text = hover_text
-      )
-    ) +
-      geom_line(linewidth = 0.8) +
-      geom_point(size = 1.5, alpha = 0.7, na.rm = TRUE) +
-      scale_x_date(
-        date_breaks = "1 year",
-        date_labels = "%Y"
-      ) +
-      labs(
-        title = paste("Monthly", variable_label),
-        subtitle = paste(
-          format(result$start_month, "%b %Y"),
-          "-",
-          format(result$end_month, "%b %Y")
-        ),
-        x = "Month",
-        y = variable_label,
-        color = "State"
-      ) +
-      theme_gray()
-    
-    if (is_hold) {
-      chart <- chart +
-        scale_y_continuous(
-          labels = scales::label_number(suffix = "%")
-        )
-    } else {
-      chart <- chart +
-        scale_y_continuous(
-          labels = scales::label_number(
-            prefix = "$",
-            scale_cut = scales::cut_short_scale()
-          )
-        )
-    }
-    
-    if (result$display == "Separate panels") {
-      chart <- chart +
-        facet_wrap(~state, scales = "free_y") +
-        guides(color = "none")
-    }
-    
-    plotly::ggplotly(
-      chart,
-      tooltip = "text"
-    ) |>
-      plotly::layout(hovermode = "closest") |>
-      plotly::config(displaylogo = FALSE)
-  })
-  
-  
-  # Explain reporting dates for all selected states
-  output$ts_context <- renderUI({
-    result <- ts_data()
-    variable_label <- names(numeric_vars)[numeric_vars == result$variable]
-    
-    date_label <- function(date) {
-      if (is.na(date)) "Not reported" else format(date, "%b %Y")
-    }
-    
-    state_notes <- purrr::map_chr(
-      result$states,
-      function(selected_state) {
-        
-        series <- get_active_series(
-          selected_state, result$variable
-        )
-        
-        series_start <- if (nrow(series) > 0) {
-          format(min(series$month), "%b %Y")
-        } else {
-          "Unavailable"
-        }
-        
-        retail_start <- first_positive_month(
-          selected_state, "handle_retail"
-        )
-        mobile_start <- first_positive_month(
-          selected_state, "handle_mobile"
-        )
-        
-        paste0(
-          selected_state, ": ", variable_label,
-          " data available since ", series_start,
-          ". First positive retail handle: ",
-          date_label(retail_start),
-          "; first positive mobile handle: ",
-          date_label(mobile_start), "."
-        )
-      }
-    )
-    
-    total_amount_vars <- c(
-      "handle", "revenue", "taxable_revenue",
-      "taxes", "promos_dedux"
-    )
-    scale_states <- character()
-    
-    if (result$variable %in% total_amount_vars) {
-      for (selected_state in result$states) {
-        
-        retail_start <- first_positive_month(
-          selected_state, "handle_retail"
-        )
-        mobile_start <- first_positive_month(
-          selected_state, "handle_mobile"
-        )
-        
-        if (
-          !is.na(retail_start) &&
-          !is.na(mobile_start) &&
-          retail_start != mobile_start &&
-          result$start_month < max(retail_start, mobile_start) &&
-          result$end_month >= max(retail_start, mobile_start)
-        ) {
-          scale_states <- c(scale_states, selected_state)
-        }
-      }
-    }
-    
-    tags$div(
-      style = paste(
-        "margin-top: 18px; padding: 12px;",
-        "background-color: #f5f5f5; border-radius: 5px;"
-      ),
-      tags$strong("Reporting Context"),
-      lapply(state_notes, tags$p),
-      if (length(scale_states) > 0) {
-        tags$p(
-          paste(scale_states, collapse = ", "),
-          "have different starting dates for reported retail and mobile",
-          "handle. Changes in channel mix may cause material differences",
-          "in the scale of total-dollar amounts."
-        )
-      },
-      tags$p(
-        "Dates are first positive observations in the dataset,",
-        "not necessarily official market launch dates."
-      ),
-      tags$p(
-        "Shared scale compares actual values across states.",
-        "Separate panels use independent vertical scales."
-      )
-    )
-  })
-  
-  
-  # Data and Summaries Filters
-  
-  # Limit the slider data to the selected states and years
-  # The tables do not change until Apply Filters is clicked
   state_year_data <- reactive({
     
     filtered <- sports_download
     
-    if (length(input$filter_states) > 0 &&
-        !("ALL" %in% input$filter_states)) {
+    if (
+      length(input$filter_states) > 0 &&
+      !("ALL" %in% input$filter_states)
+    ) {
+      
       filtered <- filtered |>
         filter(state %in% input$filter_states)
     }
     
-    if (length(input$filter_years) > 0 &&
-        !("ALL" %in% input$filter_years)) {
+    if (
+      length(input$filter_years) > 0 &&
+      !("ALL" %in% input$filter_years)
+    ) {
+      
       filtered <- filtered |>
         filter(
-          lubridate::year(month) %in% as.integer(input$filter_years)
+          lubridate::year(month) %in%
+            as.integer(input$filter_years)
         )
     }
     
@@ -1110,10 +988,15 @@ server <- function(input, output, session) {
   })
   
   
-  # Show a slider only when its numerical filter is enabled
+  # Numerical Filter 1 slider
   output$filter_slider1 <- renderUI({
-    if (!isTRUE(input$filter_use_num1)) return(NULL)
+    
+    if (!isTRUE(input$filter_use_num1)) {
+      return(NULL)
+    }
+    
     req(input$filter_num1)
+    
     make_numeric_slider(
       input$filter_num1,
       "filter_range1",
@@ -1121,9 +1004,16 @@ server <- function(input, output, session) {
     )
   })
   
+  
+  # Numerical Filter 2 slider
   output$filter_slider2 <- renderUI({
-    if (!isTRUE(input$filter_use_num2)) return(NULL)
+    
+    if (!isTRUE(input$filter_use_num2)) {
+      return(NULL)
+    }
+    
     req(input$filter_num2)
+    
     make_numeric_slider(
       input$filter_num2,
       "filter_range2",
@@ -1132,78 +1022,210 @@ server <- function(input, output, session) {
   })
   
   
-  # Use exact bounds when entered; otherwise use the slider
-  get_filter_limits <- function(slider_limits, min_text, max_text) {
-    
-    if (length(slider_limits) != 2) return(NULL)
-    
-    parse_bound <- function(value) {
-      if (is.null(value) || !nzchar(trimws(value))) {
-        return(NA_real_)
-      }
-      
-      # Allow commas, dollar signs, and percent symbols
-      suppressWarnings(
-        as.numeric(gsub("[,$%[:space:]]", "", value))
-      )
-    }
-    
-    min_exact <- parse_bound(min_text)
-    max_exact <- parse_bound(max_text)
-    
-    # Reject invalid entries instead of silently ignoring them
-    if (
-      (!is.null(min_text) &&
-       nzchar(trimws(min_text)) &&
-       !is.finite(min_exact)) ||
-      (!is.null(max_text) &&
-       nzchar(trimws(max_text)) &&
-       !is.finite(max_exact))
-    ) {
-      return(NULL)
-    }
-    
-    limits <- slider_limits
-    if (is.finite(min_exact)) limits[1] <- min_exact
-    if (is.finite(max_exact)) limits[2] <- max_exact
-    
-    if (limits[1] > limits[2]) return(NULL)
-    
-    limits
-  }
-  
-  
-  # Keep the applied observations and a description of the last filters
+  # Store applied filter results
   applied_data <- reactiveVal(sports_download)
+  
   applied_description <- reactiveVal(
     "All States | All Years | No numerical filters"
   )
   
-  output$applied_filter_description <- renderText({
-    paste("Applied filters:", applied_description())
+  
+  # Apply button controls the table and numerical summaries
+  observeEvent(input$apply_filters, {
+    
+    filtered <- state_year_data()
+    
+    state_label <- if (
+      length(input$filter_states) == 0 ||
+      "ALL" %in% input$filter_states
+    ) {
+      "All States"
+    } else {
+      paste(input$filter_states, collapse = ", ")
+    }
+    
+    year_label <- if (
+      length(input$filter_years) == 0 ||
+      "ALL" %in% input$filter_years
+    ) {
+      "All Years"
+    } else {
+      paste(input$filter_years, collapse = ", ")
+    }
+    
+    notes <- character()
+    
+    
+    # Apply both optional numerical filters
+    for (i in 1:2) {
+      
+      if (!isTRUE(input[[paste0("filter_use_num", i)]])) {
+        next
+      }
+      
+      selected_var <- input[[paste0("filter_num", i)]]
+      
+      limits <- get_filter_limits(
+        input[[paste0("filter_range", i)]],
+        input[[paste0("filter_min", i)]],
+        input[[paste0("filter_max", i)]]
+      )
+      
+      if (is.null(limits)) {
+        
+        showNotification(
+          paste("Check the range for Filter", i),
+          type = "warning"
+        )
+        
+        return()
+      }
+      
+      filtered <- filtered |>
+        filter(
+          is.finite(.data[[selected_var]]),
+          .data[[selected_var]] >= limits[1],
+          .data[[selected_var]] <= limits[2]
+        )
+      
+      notes <- c(
+        notes,
+        paste0(
+          names(numeric_vars)[numeric_vars == selected_var],
+          ": ",
+          format(
+            limits[1],
+            big.mark = ",",
+            scientific = FALSE
+          ),
+          " to ",
+          format(
+            limits[2],
+            big.mark = ",",
+            scientific = FALSE
+          )
+        )
+      )
+    }
+    
+    
+    # Save the filtered dataset and its description
+    applied_data(filtered)
+    
+    applied_description(
+      paste(
+        c(
+          state_label,
+          year_label,
+          if (length(notes) == 0) {
+            "No numerical filters"
+          } else {
+            notes
+          }
+        ),
+        collapse = " | "
+      )
+    )
+    
+  }, ignoreInit = TRUE)
+  
+  
+  # Display applied filter information
+  output$filter_summary <- renderText({
+    
+    paste0(
+      "Showing ",
+      format(nrow(applied_data()), big.mark = ","),
+      " of ",
+      format(nrow(sports_download), big.mark = ","),
+      " observations."
+    )
   })
+  
+  
+  output$applied_filter_description <- renderText({
+    
+    paste(
+      "Applied filters:",
+      applied_description()
+    )
+  })
+  
+  
+  # Data Table
+  output$sports_table <- DT::renderDT({
+    
+    numeric_cols <- names(applied_data())[
+      vapply(
+        applied_data(),
+        is.numeric,
+        logical(1)
+      )
+    ]
+    
+    DT::datatable(
+      applied_data(),
+      rownames = FALSE,
+      options = list(
+        pageLength = 10,
+        scrollX = TRUE
+      )
+    ) |>
+      DT::formatRound(
+        columns = setdiff(numeric_cols, hold_vars),
+        digits = 2
+      ) |>
+      DT::formatCurrency(
+        columns = hold_vars,
+        currency = "%",
+        digits = 2,
+        before = FALSE
+      )
+  })
+  
+  
+  # Download the filtered observations
+  output$download_data <- downloadHandler(
+    
+    filename = function() {
+      "sports_betting_data.csv"
+    },
+    
+    content = function(file) {
+      readr::write_csv(
+        applied_data(),
+        file
+      )
+    }
+  )
   
   
   # Numerical Summaries
   
-  # Dollar amounts can be combined by month, but percentages cannot be added
+  # Hold percentages cannot be combined by summing percentages
   observeEvent(input$summary_var, {
-    is_hold <- input$summary_var %in% c(
-      "hold_total", "hold_mobile", "hold_retail"
-    )
+    
+    is_hold <- input$summary_var %in% hold_vars
     
     choices <- if (is_hold) {
-      c("Individual state-month observations" = "individual")
+      
+      c(
+        "Individual state-month observations" = "individual"
+      )
+      
     } else {
+      
       c(
         "Individual state-month observations" = "individual",
         "Combined monthly totals across states" = "monthly"
       )
     }
     
-    selected_mode <- if (is_hold) {
+    current <- isolate(input$summary_mode)
+    
+    selected <- if (is_hold) {
       "individual"
-    } else if (identical(input$summary_mode, "monthly")) {
+    } else if (identical(current, "monthly")) {
       "monthly"
     } else {
       "individual"
@@ -1211,57 +1233,65 @@ server <- function(input, output, session) {
     
     updateRadioButtons(
       session,
-      inputId = "summary_mode",
+      "summary_mode",
       choices = choices,
-      selected = selected_mode
+      selected = selected
     )
   })
   
   
-  # Combined monthly totals are meaningful across states
+  # Grouping options depend on the calculation method
   observeEvent(input$summary_mode, {
     
-    if (identical(input$summary_mode, "monthly")) {
-      updateSelectInput(
-        session,
-        inputId = "summary_group",
-        choices = c(
-          "Reporting Year" = "year",
-          "All Selected Data" = "overall"
-        ),
-        selected = if (input$summary_group %in% c("year", "overall")) {
-          input$summary_group
-        } else {
-          "year"
-        }
+    is_monthly <- identical(
+      input$summary_mode,
+      "monthly"
+    )
+    
+    choices <- if (is_monthly) {
+      
+      c(
+        "Reporting Year" = "year",
+        "All Selected Data" = "overall"
       )
+      
     } else {
-      updateSelectInput(
-        session,
-        inputId = "summary_group",
-        choices = c(
-          "State" = "state",
-          "Reporting Year" = "year",
-          "State and Reporting Year" = "both",
-          "All Selected Data" = "overall"
-        ),
-        selected = if (
-          input$summary_group %in% c("state", "year", "both", "overall")
-        ) {
-          input$summary_group
-        } else {
-          "state"
-        }
+      
+      c(
+        "State" = "state",
+        "Reporting Year" = "year",
+        "State and Reporting Year" = "both",
+        "All Selected Data" = "overall"
       )
     }
+    
+    current <- isolate(input$summary_group)
+    
+    selected <- if (current %in% unname(choices)) {
+      current
+    } else if (is_monthly) {
+      "year"
+    } else {
+      "state"
+    }
+    
+    updateSelectInput(
+      session,
+      "summary_group",
+      choices = choices,
+      selected = selected
+    )
   })
   
   
-  # Begin at each state's first active reporting month
-  # Keep zero and negative values after activity begins
+  # Calculate numerical summaries
   summary_data <- reactive({
     
-    req(input$summary_var, input$summary_group, input$summary_mode)
+    req(
+      input$summary_var,
+      input$summary_mode,
+      input$summary_group
+    )
     
     filtered <- applied_data()
     
@@ -1272,10 +1302,12 @@ server <- function(input, output, session) {
       )
     )
     
-    is_hold <- input$summary_var %in% c(
-      "hold_total", "hold_mobile", "hold_retail"
+    is_hold <- input$summary_var %in% hold_vars
+    
+    is_monthly <- identical(
+      input$summary_mode,
+      "monthly"
     )
-    is_monthly <- identical(input$summary_mode, "monthly")
     
     validate(
       need(
@@ -1286,33 +1318,32 @@ server <- function(input, output, session) {
     
     validate(
       need(
-        !is_monthly || input$summary_group %in% c("year", "overall"),
-        "Choose Reporting Year or All Selected Data for monthly totals."
+        !is_monthly ||
+          input$summary_group %in% c("year", "overall"),
+        "Choose Reporting Year or All Selected Data."
       )
     )
     
-    start_dates <- purrr::map_dfr(
+    
+    # First active reporting month for each state
+    starts <- purrr::map_dfr(
       unique(filtered$state),
-      function(selected_state) {
-        
-        series <- get_active_series(
-          selected_state,
-          input$summary_var
-        )
+      function(s) {
         
         tibble(
-          state = selected_state,
-          first_month = if (nrow(series) > 0) {
-            min(series$month)
-          } else {
-            as.Date(NA)
-          }
+          state = s,
+          first_month = first_active_month(
+            s,
+            input$summary_var
+          )
         )
       }
     )
     
-    selected_data <- filtered |>
-      left_join(start_dates, by = "state") |>
+    
+    # Keep observations after activity begins
+    selected <- filtered |>
+      left_join(starts, by = "state") |>
       filter(
         !is.na(first_month),
         month >= first_month
@@ -1324,21 +1355,23 @@ server <- function(input, output, session) {
     
     validate(
       need(
-        nrow(selected_data) > 0,
-        "No active reporting observations remain for this variable."
+        nrow(selected) > 0,
+        "No active reporting observations remain."
       )
     )
     
-    active_rows <- nrow(selected_data)
+    active_rows <- nrow(selected)
     
+    
+    # Combine dollar totals by month when requested
     if (is_monthly) {
       
-      # First sum selected states for each month
-      # Missing values are excluded, not replaced with zero
-      analysis_data <- selected_data |>
+      analysis <- selected |>
         group_by(month) |>
         summarise(
-          summary_value = if (any(is.finite(summary_value))) {
+          summary_value = if (
+            any(is.finite(summary_value))
+          ) {
             sum(summary_value[is.finite(summary_value)])
           } else {
             NA_real_
@@ -1351,29 +1384,33 @@ server <- function(input, output, session) {
       
     } else {
       
-      # Keep each state-month as a separate observation
-      analysis_data <- selected_data
+      analysis <- selected
     }
     
-    analysis_rows <- nrow(analysis_data)
+    analysis_rows <- nrow(analysis)
     
-    # Group the observations for the final statistics
+    
+    # Group the selected observations
     if (input$summary_group == "state") {
-      analysis_data <- analysis_data |>
+      analysis <- analysis |>
         group_by(state)
-      
-    } else if (input$summary_group == "year") {
-      analysis_data <- analysis_data |>
+    }
+    
+    if (input$summary_group == "year") {
+      analysis <- analysis |>
         group_by(reporting_year)
-      
-    } else if (input$summary_group == "both") {
-      analysis_data <- analysis_data |>
+    }
+    
+    if (input$summary_group == "both") {
+      analysis <- analysis |>
         group_by(state, reporting_year)
     }
     
-    # Calculate the statistics
-    stats <- analysis_data |>
+    
+    # Calculate the summary statistics
+    stats <- analysis |>
       summarise(
+        
         Rows = n(),
         
         Reported = sum(is.finite(summary_value)),
@@ -1419,13 +1456,11 @@ server <- function(input, output, session) {
         .groups = "drop"
       )
     
-    # Percentages cannot be added into dollar totals
     if (is_hold) {
       stats <- stats |>
         select(-Total)
     }
     
-    # Monthly mode counts months instead of state-month observations
     if (is_monthly) {
       stats <- stats |>
         rename(Months = Rows)
@@ -1433,49 +1468,57 @@ server <- function(input, output, session) {
     
     list(
       table = stats,
-      filtered_rows = nrow(filtered),
-      active_rows = active_rows,
-      analysis_rows = analysis_rows,
       is_hold = is_hold,
       is_monthly = is_monthly,
-      variable = input$summary_var
+      filtered_rows = nrow(filtered),
+      active_rows = active_rows,
+      analysis_rows = analysis_rows
     )
   })
   
   
-  # Show the observation count for the chosen calculation method
+  # Display observation count
   output$summary_count <- renderText({
     
     result <- summary_data()
     
     if (result$is_monthly) {
+      
       paste0(
         "Combined ",
-        format(result$active_rows, big.mark = ","),
+        result$active_rows,
         " active state-month observations into ",
-        format(result$analysis_rows, big.mark = ","),
-        " monthly totals (from ",
-        format(result$filtered_rows, big.mark = ","),
-        " applied observations)."
+        result$analysis_rows,
+        " monthly totals."
       )
+      
     } else {
+      
       paste0(
         "Using ",
-        format(result$active_rows, big.mark = ","),
+        result$active_rows,
         " of ",
-        format(result$filtered_rows, big.mark = ","),
+        result$filtered_rows,
         " applied observations."
       )
     }
   })
   
   
-  # Display the summary statistics
+  # Numerical summary table
   output$summary_table <- DT::renderDT({
     
     result <- summary_data()
     
-    table <- DT::datatable(
+    cols <- c(
+      "Mean",
+      "Median",
+      "SD",
+      "Minimum",
+      "Maximum"
+    )
+    
+    tbl <- DT::datatable(
       result$table,
       rownames = FALSE,
       options = list(
@@ -1484,292 +1527,931 @@ server <- function(input, output, session) {
       )
     )
     
-    stat_cols <- c(
-      "Mean", "Median", "SD", "Minimum", "Maximum"
-    )
-    
     if (result$is_hold) {
-      table |>
+      
+      tbl |>
         DT::formatCurrency(
-          columns = stat_cols,
+          columns = cols,
           currency = "%",
           digits = 2,
           before = FALSE
         )
+      
     } else {
-      table |>
+      
+      tbl |>
         DT::formatRound(
-          columns = c(stat_cols, "Total"),
+          columns = c(cols, "Total"),
           digits = 2
         )
     }
   })
   
   
-  # Explain the calculation method
+  # Numerical summary explanation
   output$summary_note <- renderUI({
     
     result <- summary_data()
     
     tags$div(
       style = paste(
-        "margin-top: 18px; padding: 12px;",
-        "background-color: #f5f5f5; border-radius: 5px;"
+        "margin-top:18px;padding:12px;",
+        "background-color:#f5f5f5;border-radius:5px;"
       ),
       
       tags$strong("Summary Notes"),
       
       tags$p(
-        "Statistics use the filters last applied in Data & Summaries.",
-        "Each state begins at its first active reporting month.",
-        "Prelaunch observations are excluded, but later zeros",
+        "These summaries use only the Data & Summaries filters.",
+        "Prelaunch observations are excluded; later zeros",
         "and negative values are retained."
       ),
       
       if (result$is_monthly) {
+        
         tags$p(
-          "Combined monthly totals: first sum available dollar",
-          "values across selected states for each month. Then",
-          "calculate the mean, median, sample SD, minimum, and",
-          "maximum of those monthly totals within each reporting",
-          "year or across all selected months. Months counts",
-          "monthly totals, not state-months."
+          "Combined monthly totals sum dollar amounts",
+          "across states in each month.",
+          "The mean and sample SD are then calculated",
+          "across monthly totals."
         )
+        
       } else {
+        
         tags$p(
-          "Individual observations: each state-month contributes",
-          "one value to the mean, median, and sample SD."
+          "Individual observations treat each state-month",
+          "as a separate value."
         )
       },
       
       tags$p(
-        "Reported counts valid numerical values; Missing counts",
-        "unavailable values. Missing amounts are skipped, not",
-        "converted to zeros. With monthly totals, the number of",
-        "states contributing can vary if data are unavailable or",
-        "excluded by numerical filters."
+        "Missing observations are omitted, not converted to zero."
       ),
       
       if (result$is_hold) {
+        
         tags$p(
-          "Hold statistics are percentages and use an unweighted",
-          "mean. Hold percentages cannot be summed, so monthly",
-          "total mode is unavailable."
+          "Mean hold is the unweighted average of",
+          "reported monthly percentages.",
+          "No Total is shown for hold rates."
         )
+        
       } else {
+        
         tags$p(
-          "Total is the sum of reported dollar values. If the same",
-          "observations are included, Total is unchanged between",
-          "the two calculation methods."
+          "Total is the sum of valid dollar observations."
         )
       }
     )
   })
   
   
-  # Apply the selected filters
-  observeEvent(input$apply_filters, {
-    
-    filtered <- state_year_data()
-    
-    # Describe the filters used in the latest run
-    state_label <- if (
-      length(input$filter_states) == 0 ||
-      "ALL" %in% input$filter_states
-    ) {
-      "All States"
-    } else {
-      paste(input$filter_states, collapse = ", ")
-    }
-    
-    year_label <- if (
-      length(input$filter_years) == 0 ||
-      "ALL" %in% input$filter_years
-    ) {
-      "All Years"
-    } else {
-      paste(input$filter_years, collapse = ", ")
-    }
-    
-    filter_notes <- character()
-    
-    number_label <- function(number) {
-      format(
-        number,
-        trim = TRUE,
-        scientific = FALSE,
-        big.mark = ","
-      )
-    }
-    
-    # Apply the first enabled numerical filter
-    if (isTRUE(input$filter_use_num1)) {
+  # Correlation Analysis
+  # Uses original data and independent controls
+  
+  observeEvent(
+    list(input$corr_x, input$corr_y),
+    {
       
-      limits <- get_filter_limits(
-        input$filter_range1,
-        input$filter_min1,
-        input$filter_max1
-      )
+      is_hold <- input$corr_x %in% hold_vars ||
+        input$corr_y %in% hold_vars
       
-      if (is.null(limits)) {
-        showNotification(
-          "Check the range for Filter 1.",
-          type = "warning"
-        )
-        return()
-      }
-      
-      selected_var <- input$filter_num1
-      
-      filter_notes <- c(
-        filter_notes,
-        paste0(
-          names(numeric_vars)[numeric_vars == selected_var],
-          ": ",
-          number_label(limits[1]),
-          " to ",
-          number_label(limits[2])
-        )
-      )
-      
-      filtered <- filtered |>
-        filter(
-          is.finite(.data[[selected_var]]),
-          .data[[selected_var]] >= limits[1],
-          .data[[selected_var]] <= limits[2]
-        )
-    }
-    
-    
-    # Apply the second enabled numerical filter
-    if (isTRUE(input$filter_use_num2)) {
-      
-      limits <- get_filter_limits(
-        input$filter_range2,
-        input$filter_min2,
-        input$filter_max2
-      )
-      
-      if (is.null(limits)) {
-        showNotification(
-          "Check the range for Filter 2.",
-          type = "warning"
-        )
-        return()
-      }
-      
-      selected_var <- input$filter_num2
-      
-      filter_notes <- c(
-        filter_notes,
-        paste0(
-          names(numeric_vars)[numeric_vars == selected_var],
-          ": ",
-          number_label(limits[1]),
-          " to ",
-          number_label(limits[2])
-        )
-      )
-      
-      filtered <- filtered |>
-        filter(
-          is.finite(.data[[selected_var]]),
-          .data[[selected_var]] >= limits[1],
-          .data[[selected_var]] <= limits[2]
-        )
-    }
-    
-    # Save both the filtered data and its description
-    applied_data(filtered)
-    
-    applied_description(
-      paste(
+      choices <- if (is_hold) {
+        
         c(
-          state_label,
-          year_label,
-          if (length(filter_notes) == 0) {
-            "No numerical filters"
-          } else {
-            filter_notes
-          }
-        ),
-        collapse = " | "
-      )
-    )
-  }, ignoreInit = TRUE)
-  
-  
-  # Display the number of filtered observations
-  output$filter_summary <- renderText({
-    
-    paste0(
-      "Showing ",
-      format(nrow(applied_data()), big.mark = ","),
-      " of ",
-      format(nrow(sports_download), big.mark = ","),
-      " observations."
-    )
-  })
-  
-  
-  # Format the data table without changing downloaded values
-  output$sports_table <- DT::renderDT({
-    
-    hold_cols <- c(
-      "hold_total",
-      "hold_mobile",
-      "hold_retail"
-    )
-    
-    numeric_cols <- names(applied_data())[
-      vapply(
-        applied_data(),
-        is.numeric,
-        logical(1)
-      )
-    ]
-    
-    amount_cols <- setdiff(numeric_cols, hold_cols)
-    
-    DT::datatable(
-      applied_data(),
-      rownames = FALSE,
-      options = list(
-        pageLength = 10,
-        scrollX = TRUE
-      )
-    ) |>
-      DT::formatRound(
-        columns = amount_cols,
-        digits = 2
-      ) |>
-      DT::formatCurrency(
-        columns = hold_cols,
-        currency = "%",
-        digits = 2,
-        before = FALSE
-      )
-  })
-  
-  
-  # Download exactly the rows selected by the applied filters
-  output$download_data <- downloadHandler(
-    
-    filename = function() {
-      "sports_betting_data.csv"
-    },
-    
-    content = function(file) {
-      readr::write_csv(
-        applied_data(),
-        file
+          "Reported Value" = "level",
+          "YoY Change (dollars or percentage points)" = "change"
+        )
+        
+      } else {
+        
+        comparison_choices("handle")
+      }
+      
+      current <- isolate(input$corr_view)
+      
+      updateSelectInput(
+        session,
+        "corr_view",
+        choices = choices,
+        selected = if (current %in% unname(choices)) {
+          current
+        } else {
+          "level"
+        }
       )
     }
   )
+  
+  
+  # Match the two selected state-variable series
+  paired_periods <- reactive({
+    
+    req(
+      input$corr_state_x,
+      input$corr_state_y,
+      input$corr_x,
+      input$corr_y,
+      input$corr_period,
+      input$corr_view
+    )
+    
+    x <- get_chart_series(
+      input$corr_state_x,
+      input$corr_x,
+      input$corr_period
+    )
+    
+    y <- get_chart_series(
+      input$corr_state_y,
+      input$corr_y,
+      input$corr_period
+    )
+    
+    if (input$corr_view != "level") {
+      
+      x <- add_yoy(
+        x,
+        input$corr_x,
+        input$corr_view
+      )
+      
+      y <- add_yoy(
+        y,
+        input$corr_y,
+        input$corr_view
+      )
+    }
+    
+    inner_join(
+      x |> rename(x = value),
+      y |> rename(y = value),
+      by = "period"
+    ) |>
+      filter(
+        is.finite(x),
+        is.finite(y)
+      ) |>
+      arrange(period)
+  })
+  
+  
+  # Update the available date range
+  observeEvent(paired_periods(), {
+    
+    data <- paired_periods()
+    
+    if (nrow(data) > 0) {
+      
+      updateDateRangeInput(
+        session,
+        "corr_dates",
+        start = min(data$period),
+        end = max(data$period),
+        min = min(data$period),
+        max = max(data$period)
+      )
+    }
+  })
+  
+  
+  output$available_period <- renderText({
+    
+    data <- paired_periods()
+    
+    if (nrow(data) == 0) {
+      return(
+        "No matched periods; YoY requires the previous year."
+      )
+    }
+    
+    paste0(
+      "Available: ",
+      format_period(
+        min(data$period),
+        input$corr_period
+      ),
+      " - ",
+      format_period(
+        max(data$period),
+        input$corr_period
+      )
+    )
+  })
+  
+  
+  # Store the last requested correlation
+  corr_results <- reactiveVal(NULL)
+  
+  observeEvent(input$run_corr, {
+    
+    req(input$corr_dates)
+    
+    data <- paired_periods()
+    
+    from <- period_floor(
+      input$corr_dates[1],
+      input$corr_period
+    )
+    
+    to <- period_floor(
+      input$corr_dates[2],
+      input$corr_period
+    )
+    
+    data <- data |>
+      filter(
+        period >= from,
+        period <= to
+      )
+    
+    
+    # Identify when mobile betting activity began
+    x_start <- first_positive_month(
+      input$corr_state_x,
+      "handle_mobile"
+    )
+    
+    y_start <- first_positive_month(
+      input$corr_state_y,
+      "handle_mobile"
+    )
+    
+    x_mobile <- if (is.na(x_start)) {
+      rep(FALSE, nrow(data))
+    } else {
+      data$period >= x_start
+    }
+    
+    y_mobile <- if (is.na(y_start)) {
+      rep(FALSE, nrow(data))
+    } else {
+      data$period >= y_start
+    }
+    
+    data <- data |>
+      mutate(
+        market_period = factor(
+          case_when(
+            x_mobile & y_mobile ~ "Both states mobile-active",
+            x_mobile | y_mobile ~ "One state mobile-active",
+            TRUE ~ "Neither state mobile-active"
+          ),
+          levels = c(
+            "Neither state mobile-active",
+            "One state mobile-active",
+            "Both states mobile-active"
+          )
+        )
+      )
+    
+    corr_results(
+      list(
+        data = data,
+        state_x = input$corr_state_x,
+        state_y = input$corr_state_y,
+        var_x = input$corr_x,
+        var_y = input$corr_y,
+        period = input$corr_period,
+        view = input$corr_view
+      )
+    )
+  })
+  
+  
+  # Validate correlation data
+  corr_data <- reactive({
+    
+    result <- corr_results()
+    
+    validate(
+      need(
+        !is.null(result),
+        "Choose inputs and click Run Correlation."
+      )
+    )
+    
+    validate(
+      need(
+        !(result$state_x == result$state_y &&
+            result$var_x == result$var_y),
+        "Select different states or variables."
+      ),
+      
+      need(
+        nrow(result$data) >= 3,
+        "At least three matched periods are required."
+      ),
+      
+      need(
+        isTRUE(sd(result$data$x) > 0) &&
+          isTRUE(sd(result$data$y) > 0),
+        "Correlation cannot be calculated when a variable is constant."
+      )
+    )
+    
+    result
+  })
+  
+  
+  # Correlation scatterplot
+  output$corr_plot <- renderPlot({
+    
+    result <- corr_data()
+    
+    axis_label <- function(s, var) {
+      
+      label <- names(numeric_vars)[
+        numeric_vars == var
+      ]
+      
+      if (result$view != "level") {
+        
+        unit <- if (var %in% hold_vars) {
+          "pp"
+        } else if (result$view == "change") {
+          "$ change"
+        } else {
+          "% growth"
+        }
+        
+        label <- paste(label, "YoY", unit)
+      }
+      
+      paste(s, label)
+    }
+    
+    ggplot(
+      result$data,
+      aes(x = x, y = y)
+    ) +
+      geom_point(
+        aes(color = market_period),
+        size = 2.5,
+        alpha = 0.8
+      ) +
+      geom_smooth(
+        method = "lm",
+        se = FALSE,
+        color = "black"
+      ) +
+      scale_color_manual(
+        values = c(
+          "Neither state mobile-active" = "gray50",
+          "One state mobile-active" = "#E69F00",
+          "Both states mobile-active" = "#0072B2"
+        ),
+        name = "Market Period"
+      ) +
+      scale_x_continuous(
+        labels = scales::label_number(
+          scale_cut = scales::cut_short_scale()
+        )
+      ) +
+      scale_y_continuous(
+        labels = scales::label_number(
+          scale_cut = scales::cut_short_scale()
+        )
+      ) +
+      labs(
+        title = paste(
+          period_labels[[result$period]],
+          "Correlation"
+        ),
+        subtitle = paste(
+          result$state_x,
+          "vs",
+          result$state_y
+        ),
+        x = axis_label(
+          result$state_x,
+          result$var_x
+        ),
+        y = axis_label(
+          result$state_y,
+          result$var_y
+        )
+      ) +
+      theme_gray()
+  })
+  
+  
+  # Correlation coefficient
+  output$corr_result <- renderText({
+    
+    result <- corr_data()
+    
+    paste0(
+      "Pearson correlation (r): ",
+      round(
+        cor(result$data$x, result$data$y),
+        3
+      ),
+      " | Matched periods: ",
+      nrow(result$data),
+      " | ",
+      format_period(
+        min(result$data$period),
+        result$period
+      ),
+      " - ",
+      format_period(
+        max(result$data$period),
+        result$period
+      )
+    )
+  })
+  
+  
+  # Correlation reporting context
+  output$market_note <- renderUI({
+    
+    result <- corr_data()
+    
+    state_note <- function(s) {
+      
+      paste0(
+        s,
+        ": retail first positive ",
+        first_positive_month(s, "handle_retail"),
+        "; mobile first positive ",
+        first_positive_month(s, "handle_mobile"),
+        "."
+      )
+    }
+    
+    tags$div(
+      style = paste(
+        "margin-top:18px;padding:12px;",
+        "background-color:#f5f5f5;border-radius:5px;"
+      ),
+      
+      tags$strong("Reporting Context"),
+      
+      tags$p(
+        state_note(result$state_x)
+      ),
+      
+      tags$p(
+        state_note(result$state_y)
+      ),
+      
+      tags$p(
+        "Correlation uses the original dataset,",
+        "independently of Data & Summaries filters."
+      ),
+      
+      tags$p(
+        "Complete months are required for quarterly,",
+        "annual, and rolling calculations.",
+        "YoY compares the same period one year earlier."
+      ),
+      
+      tags$p(
+        "Adjacent rolling periods overlap",
+        "and are not independent."
+      )
+    )
+  })
+  
+  
+  # Time Series Analysis
+  # Uses the original data and independent controls
+  
+  observeEvent(input$ts_var, {
+    
+    choices <- comparison_choices(input$ts_var)
+    
+    current <- isolate(input$ts_view)
+    
+    updateSelectInput(
+      session,
+      "ts_view",
+      choices = choices,
+      selected = if (current %in% unname(choices)) {
+        current
+      } else {
+        "level"
+      }
+    )
+  })
+  
+  
+  # Prepare the selected time series
+  ts_series <- reactive({
+    
+    req(
+      input$ts_var,
+      input$ts_period,
+      input$ts_view
+    )
+    
+    if (length(input$ts_states) == 0) {
+      
+      return(tibble(
+        period = as.Date(character()),
+        value = numeric(),
+        state = character()
+      ))
+    }
+    
+    purrr::map_dfr(
+      input$ts_states,
+      function(s) {
+        
+        data <- get_chart_series(
+          s,
+          input$ts_var,
+          input$ts_period
+        )
+        
+        if (input$ts_view != "level") {
+          
+          data <- add_yoy(
+            data,
+            input$ts_var,
+            input$ts_view
+          )
+        }
+        
+        data |>
+          filter(is.finite(value)) |>
+          mutate(state = s)
+      }
+    ) |>
+      arrange(state, period)
+  })
+  
+  
+  # Update the available date range
+  observeEvent(ts_series(), {
+    
+    series <- ts_series()
+    
+    if (nrow(series) > 0) {
+      
+      updateDateRangeInput(
+        session,
+        "ts_dates",
+        start = min(series$period),
+        end = max(series$period),
+        min = min(series$period),
+        max = max(series$period)
+      )
+    }
+  })
+  
+  
+  output$ts_available_period <- renderText({
+    
+    series <- ts_series()
+    
+    if (nrow(series) == 0) {
+      return(
+        "No available periods; YoY requires the previous year."
+      )
+    }
+    
+    paste0(
+      "Available: ",
+      format_period(
+        min(series$period),
+        input$ts_period
+      ),
+      " - ",
+      format_period(
+        max(series$period),
+        input$ts_period
+      )
+    )
+  })
+  
+  
+  # Update the plot only when the button is clicked
+  ts_results <- reactiveVal(NULL)
+  
+  observeEvent(input$run_ts, {
+    
+    req(input$ts_dates)
+    
+    from <- period_floor(
+      input$ts_dates[1],
+      input$ts_period
+    )
+    
+    to <- period_floor(
+      input$ts_dates[2],
+      input$ts_period
+    )
+    
+    selected <- ts_series() |>
+      filter(
+        period >= from,
+        period <= to
+      )
+    
+    ts_results(
+      list(
+        data = selected,
+        states = input$ts_states,
+        variable = input$ts_var,
+        period = input$ts_period,
+        view = input$ts_view,
+        display = input$ts_display,
+        start_date = from,
+        end_date = to
+      )
+    )
+  })
+  
+  
+  # Validate the time series
+  ts_data <- reactive({
+    
+    result <- ts_results()
+    
+    validate(
+      need(
+        !is.null(result),
+        "Choose inputs and click Update Chart."
+      )
+    )
+    
+    validate(
+      need(
+        nrow(result$data) > 0,
+        "No values for the selected period."
+      )
+    )
+    
+    result
+  })
+  
+  
+  # Interactive Time Series chart
+  output$ts_plot <- renderPlotly({
+    
+    result <- ts_data()
+    
+    label <- names(numeric_vars)[
+      numeric_vars == result$variable
+    ]
+    
+    is_hold <- result$variable %in% hold_vars
+    is_yoy <- result$view != "level"
+    is_growth <- result$view == "yoy"
+    
+    suffix <- if (is_hold && is_yoy) {
+      " pp"
+    } else if (is_hold || is_growth) {
+      "%"
+    } else {
+      ""
+    }
+    
+    is_dollars <- !is_hold && !is_growth
+    
+    y_label <- if (is_yoy) {
+      
+      paste(
+        "YoY",
+        label,
+        if (is_hold) {
+          "(percentage points)"
+        } else if (is_growth) {
+          "(%)"
+        } else {
+          "($ change)"
+        }
+      )
+      
+    } else {
+      
+      label
+    }
+    
+    
+    # Prepare hover text
+    chart_data <- result$data |>
+      mutate(
+        
+        period_label = vapply(
+          period,
+          format_period,
+          character(1),
+          mode = result$period
+        ),
+        
+        hover_value = if (is_dollars) {
+          
+          paste0(
+            "$",
+            formatC(
+              value,
+              format = "f",
+              digits = 2,
+              big.mark = ","
+            )
+          )
+          
+        } else {
+          
+          paste0(
+            formatC(
+              value,
+              format = "f",
+              digits = 2,
+              big.mark = ","
+            ),
+            suffix
+          )
+        },
+        
+        hover_text = paste0(
+          "State: ",
+          state,
+          "<br>Period: ",
+          period_label,
+          "<br>",
+          y_label,
+          ": ",
+          hover_value
+        )
+      )
+    
+    
+    # Missing periods remain gaps in the chart
+    step <- if (result$period == "year") {
+      "year"
+    } else if (result$period == "quarter") {
+      "quarter"
+    } else {
+      "month"
+    }
+    
+    chart_data <- chart_data |>
+      group_by(state) |>
+      complete(
+        period = seq(
+          min(period),
+          max(period),
+          by = step
+        )
+      ) |>
+      ungroup()
+    
+    
+    chart <- ggplot(
+      chart_data,
+      aes(
+        x = period,
+        y = value,
+        color = state,
+        group = state,
+        text = hover_text
+      )
+    ) +
+      geom_line(
+        linewidth = 0.8
+      ) +
+      geom_point(
+        size = 1.5,
+        alpha = 0.7,
+        na.rm = TRUE
+      ) +
+      labs(
+        title = paste(
+          period_labels[[result$period]],
+          y_label
+        ),
+        
+        subtitle = paste(
+          format_period(
+            result$start_date,
+            result$period
+          ),
+          "-",
+          format_period(
+            result$end_date,
+            result$period
+          )
+        ),
+        
+        x = "Reporting Period",
+        y = y_label,
+        color = "State"
+      ) +
+      theme_gray()
+    
+    
+    # Dollar and percentage formatting
+    if (is_dollars) {
+      
+      chart <- chart +
+        scale_y_continuous(
+          labels = scales::label_number(
+            prefix = "$",
+            scale_cut = scales::cut_short_scale()
+          )
+        )
+      
+    } else {
+      
+      chart <- chart +
+        scale_y_continuous(
+          labels = scales::label_number(
+            suffix = suffix
+          )
+        )
+    }
+    
+    
+    # Independent vertical scales when requested
+    if (result$display == "Separate panels") {
+      
+      chart <- chart +
+        facet_wrap(
+          ~state,
+          scales = "free_y"
+        ) +
+        guides(color = "none")
+    }
+    
+    plotly::ggplotly(
+      chart,
+      tooltip = "text"
+    ) |>
+      plotly::layout(
+        hovermode = "closest"
+      ) |>
+      plotly::config(
+        displaylogo = FALSE
+      )
+  })
+  
+  
+  # Time Series reporting context
+  output$ts_context <- renderUI({
+    
+    result <- ts_data()
+    
+    state_notes <- purrr::map_chr(
+      result$states,
+      function(s) {
+        
+        paste0(
+          s,
+          ": retail first positive ",
+          first_positive_month(s, "handle_retail"),
+          "; mobile first positive ",
+          first_positive_month(s, "handle_mobile"),
+          "."
+        )
+      }
+    )
+    
+    tags$div(
+      style = paste(
+        "margin-top:18px;padding:12px;",
+        "background-color:#f5f5f5;border-radius:5px;"
+      ),
+      
+      tags$strong("Reporting Context"),
+      
+      lapply(state_notes, tags$p),
+      
+      tags$p(
+        "This chart uses the original dataset",
+        "independently of Data & Summaries filters."
+      ),
+      
+      tags$p(
+        "Calendar quarters and years require all",
+        "3 or 12 months.",
+        "Trailing windows require all included months."
+      ),
+      
+      tags$p(
+        "YTD totals begin in January and YoY uses",
+        "the equivalent prior-year period."
+      ),
+      
+      tags$p(
+        "Aggregated hold is revenue divided by handle times 100.",
+        "YoY hold changes are measured in percentage points."
+      ),
+      
+      tags$p(
+        "First positive observations are not necessarily",
+        "legal market launch dates.",
+        "Adjacent rolling periods overlap."
+      )
+    )
+  })
 }
 
 
-# Step 5: Run the Shiny Application
+# Step 5: Run the app
 
 shinyApp(
   ui = ui,
