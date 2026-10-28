@@ -220,7 +220,7 @@ ui <- fluidPage(
             tags$li(strong("Handle: "), "the dollar amount wagered, not operator revenue."),
             tags$li(strong("Revenue: "), "reported sportsbook revenue; taxes are a separate reported field."),
             tags$li(strong("Hold (%): "), "100 × revenue / handle where the denominator is positive. Aggregated hold is calculated using combined dollars, not an unweighted average of state rates."),
-            tags$li(strong("Per capita: "), "an annual financial total divided by the jurisdiction's resident population. This is not the average amount wagered per bettor. Population comparisons cover ", population_coverage, "; partial-year totals are not annualized.")
+            tags$li(strong("Per capita: "), "an annual financial total divided by the jurisdiction's resident population. Population comparisons cover ", population_coverage, "; partial-year totals are not annualized.")
           )
         ),
         column(
