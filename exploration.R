@@ -24,6 +24,7 @@ glimpse(sports)
 
 # Create categorical variables for year and calendar month
 # mutate() adds new columns to our existing dataset
+# lubridate is an R package to make working with dates and times
 # year() extracts the year from a Date
 # as.factor() converts year into a categorical variable
 # month() extracts the calendar month
