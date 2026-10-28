@@ -110,7 +110,7 @@ sports_long |>
 
 # Step 8: Convert Data Types
 
-# Convert month from character to Date
+# Convert month from character to date
 # Convert amount from character to numeric (double)
 # Preserve missing values, zeros, and negative values
 sports_long <- sports_long |>
@@ -333,3 +333,117 @@ write_csv(
 
 # Verify the final dimensions of our dataset
 dim(sports_clean)
+
+
+# Step 15: Prepare Annual State Population Data
+
+# Import annual population estimates from the U.S. Census Bureau
+# The 2019 dataset provides population estimates for 2018 and 2019
+# The 2025 dataset provides population estimates for 2020 through 2025
+
+population_2019_raw <- read_csv("data/NST-EST2019-ALLDATA.csv")
+
+population_2025_raw <- read_csv("data/NST-EST2025-ALLDATA.csv")
+
+
+# Prepare population estimates for 2018 and 2019
+#
+# SUMLEV identifies the geographic summary level
+# SUMLEV == 40 selects state-level observations
+# as.integer() ensures SUMLEV is treated as a number
+# Exclude Puerto Rico, which is not in our sports betting dataset
+#
+# select() keeps the state name and the two population columns
+# pivot_longer() converts the annual population columns into rows
+
+population_2018_2019 <- population_2019_raw |>
+  filter(
+    as.integer(SUMLEV) == 40,
+    NAME != "Puerto Rico"
+  ) |>
+  select(
+    NAME,
+    POPESTIMATE2018,
+    POPESTIMATE2019
+  ) |>
+  pivot_longer(
+    cols = starts_with("POPESTIMATE"),
+    names_to = "year",
+    values_to = "population"
+  )
+
+
+# Prepare population estimates for 2020 through 2025
+# Use the same structure as the 2018-2019 dataset
+# This ensures the two datasets can be combined
+
+population_2020_2025 <- population_2025_raw |>
+  filter(
+    as.integer(SUMLEV) == 40,
+    NAME != "Puerto Rico"
+  ) |>
+  select(
+    NAME,
+    POPESTIMATE2020:POPESTIMATE2025
+  ) |>
+  pivot_longer(
+    cols = starts_with("POPESTIMATE"),
+    names_to = "year",
+    values_to = "population"
+  )
+
+
+# Combine the population datasets
+#
+# bind_rows() stacks the observations from both datasets
+# Each state will have one observation for each year, 2018-2025
+#
+# state.name and state.abb are built-in R vectors
+# match() finds the position of each state in state.name
+# state.abb[] retrieves the corresponding two-letter abbreviation
+# District of Columbia is handled separately because it is not
+# included in the built-in state.name and state.abb vectors
+#
+# str_remove() removes "POPESTIMATE" from the year values
+# as.factor() converts year to a categorical variable
+# select() retains the three variables needed for our analysis
+# arrange() sorts observations by state and year
+
+population_clean <- bind_rows(
+  population_2018_2019,
+  population_2020_2025
+) |>
+  mutate(
+    state = case_when(
+      NAME == "District of Columbia" ~ "DC",
+      TRUE ~ state.abb[match(NAME, state.name)]
+    ),
+    year = as.factor(str_remove(year, "POPESTIMATE"))
+  ) |>
+  select(
+    state,
+    year,
+    population
+  ) |>
+  arrange(state, year)
+
+
+# Verify the dimensions of our combined population dataset
+dim(population_clean)
+
+# Check that no state abbreviations or population values are missing
+sum(is.na(population_clean$state))
+sum(is.na(population_clean$population))
+
+# Inspect population estimates for our four comparison states
+population_clean |>
+  filter(state %in% c("NY", "NJ", "PA", "MI"))
+
+
+# Export the prepared population dataset
+# This can be reused in exploration.R and our Shiny application
+
+write_csv(
+  population_clean,
+  "data/state_population_clean.csv"
+)
