@@ -107,20 +107,31 @@ sports_long |>
   ) |>
   head(6)
 
-
 # Step 8: Convert Data Types
 
 # Convert month from character to date
 # Convert amount from character to numeric (double)
 # Preserve missing values, zeros, and negative values
+#
+# floor_date() standardizes dates to the first day of each month
+# For example, August 31, 2026 becomes August 1, 2026
+# This ensures consistent monthly dates throughout our analysis
+# as.Date() must run first to convert the character values into dates
+
 sports_long <- sports_long |>
   mutate(
-    month = as.Date(month),
+    month = lubridate::floor_date(as.Date(month), unit = "month"),
     amount = as.numeric(amount)
   )
 
 # Verify the four columns and their data types
 glimpse(sports_long)
+
+# Verify that all dates now represent the first day of each month
+sports_long |>
+  distinct(month) |>
+  arrange(desc(month)) |>
+  head(12)
 
 
 # Step 9: Convert Financial Metrics into Columns
