@@ -11,7 +11,13 @@ library(tidyverse)
 # Step 2: Import the Clean Dataset
 
 # Import the tidy dataset created in prepare_data.R
-sports <- read_csv("data/sports_betting_clean.csv")
+sports <- read_csv("data/sports_betting_clean.csv", show_col_types = FALSE) |>
+  mutate(month = as.Date(month))
+
+# Use the same annual Census population estimates and per-capita logic as app.R.
+# This keeps the static analysis consistent with the interactive application.
+# Both helpers.R and the data/ folder must be in the Project 2 repository.
+source("helpers.R", local = TRUE)
 
 # Check the number of rows and columns
 dim(sports)
@@ -24,7 +30,6 @@ glimpse(sports)
 
 # Create categorical variables for year and calendar month
 # mutate() adds new columns to our existing dataset
-# lubridate is an R package to make working with dates and times
 # year() extracts the year from a Date
 # as.factor() converts year into a categorical variable
 # month() extracts the calendar month
@@ -221,6 +226,7 @@ stacked_handle_data <- sports |>
 # labs() adds chart and axis labels
 # theme_minimal() applies a clean visual style
 
+print(
 ggplot(
   data = stacked_handle_data,
   aes(x = month, y = cumulative_handle / 1e9, fill = state)
@@ -239,12 +245,13 @@ ggplot(
   labs(
     title = "Cumulative U.S. Sports Betting Handle by State",
     subtitle = "January 2018 - August 2026",
-    x = "Year",
+    x = "Reporting Month",
     y = "Cumulative Handle ($ Billions)",
     fill = "State",
     caption = "Cumulative reported handle; missing values are not estimated."
   ) +
   theme_minimal()
+)
 
 # Step 7: National Monthly Sports Betting Hold Percentage
 
@@ -289,6 +296,7 @@ national_monthly_hold <- sports |>
 # labs() adds chart and axis labels
 # theme_minimal() applies a clean visual style
 
+print(
 ggplot(
   data = national_monthly_hold,
   aes(x = month, y = national_hold_pct)
@@ -307,11 +315,12 @@ ggplot(
   labs(
     title = "National Monthly Sports Betting Hold Percentage",
     subtitle = "January 2018 - August 2026",
-    x = "Year",
+    x = "Reporting Month",
     y = "National Hold (%)",
     caption = "Based on states reporting both handle and revenue; coverage varies by month."
   ) +
   theme_minimal()
+)
 
 # Inspect the most recent 12 months of national hold calculations
 # select() chooses the variables we want to display
@@ -354,6 +363,7 @@ hold_data <- sports |>
 # The y-axis counts the number of state-month observations
 # labs() adds chart and axis labels
 # theme_minimal() applies a clean visual style
+print(
 ggplot(
   data = hold_data,
   aes(x = hold_total)
@@ -371,6 +381,7 @@ ggplot(
   ) +
   theme_minimal() +
   coord_cartesian(xlim = c(-10, 35))
+)
 
 
 # Step 9: Monthly Sports Betting Handle by State
@@ -397,6 +408,7 @@ handle_data <- sports |>
 # expand = expansion(mult = 0) removes extra space at the ends
 # labs() adds chart and axis labels
 # theme_minimal() applies a clean visual style
+print(
 ggplot(
   data = handle_data,
   aes(x = month, y = handle / 1e9, color = state)
@@ -423,6 +435,7 @@ ggplot(
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
+)
 
 
 # Step 10: Monthly Sports Betting Revenue by State
@@ -445,6 +458,7 @@ revenue_data <- sports |>
 # seq() generates dates at three-month intervals from January 2022
 # limits sets the beginning and end of the x-axis
 # expand = expansion(mult = 0) removes extra space at the ends
+print(
 ggplot(
   data = revenue_data,
   aes(x = month, y = revenue / 1e6, color = state)
@@ -471,6 +485,7 @@ ggplot(
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
+)
 
 
 # Step 11: Monthly Hold Percentage by State and Year
@@ -503,6 +518,7 @@ state_hold_data <- sports |>
 # labs() adds chart and axis labels
 # theme_minimal() applies a clean visual style
 
+print(
 ggplot(
   data = state_hold_data,
   aes(x = year, y = hold_total)
@@ -518,250 +534,173 @@ ggplot(
     caption = "Each point represents one state-month; 2026 includes January-August only."
   ) +
   theme_minimal()
-
-
-
-
-# Step 12: Sports Betting Taxes per Capita by State
-
-# Import the prepared Census population dataset
-# This contains annual state population estimates from 2018 through 2025
-# as.character() ensures year can be matched across datasets
-
-population_data <- read_csv("data/state_population_clean.csv") |>
-  mutate(
-    year = as.character(year)
-  )
-
-
-# Calculate annual sports betting taxes for 2018 through 2025
-#
-# filter() removes missing tax observations
-# Exclude 2026 because we will calculate a separate LTM period
-# group_by() groups observations by state and year
-# summarise() calculates total taxes collected during each year
-# n() counts the number of months reporting taxes
-# .groups = "drop" removes the grouping after summarizing
-
-annual_tax_data <- sports |>
-  filter(
-    !is.na(taxes),
-    year != "2026"
-  ) |>
-  group_by(state, year) |>
-  summarise(
-    total_taxes = sum(taxes),
-    months_reported = n(),
-    .groups = "drop"
-  ) |>
-  mutate(
-    year_label = as.character(year)
-  ) |>
-  select(state, year_label, total_taxes, months_reported)
-
-
-# Calculate Last Twelve Months (LTM) taxes through August 2026
-#
-# The LTM period runs from September 2025 through August 2026
-# Month dates in our dataset represent the last day of each month
-# Use September 1, 2026 as an exclusive upper boundary
-# This includes all of August 2026 without including September 2026
-#
-# Keep only states with all 12 months of reported tax data
-
-ltm_tax_data <- sports |>
-  filter(
-    month >= as.Date("2025-09-01"),
-    month < as.Date("2026-09-01"),
-    !is.na(taxes)
-  ) |>
-  group_by(state) |>
-  summarise(
-    total_taxes = sum(taxes),
-    months_reported = n(),
-    .groups = "drop"
-  ) |>
-  filter(months_reported == 12) |>
-  mutate(
-    year_label = "2026 LTM"
-  ) |>
-  select(state, year_label, total_taxes, months_reported)
-
-
-# Combine the annual and LTM tax summaries
-#
-# bind_rows() stacks the two datasets together
-# Each state can have annual observations plus one LTM observation
-#
-# For the 2026 LTM period, use the 2025 population estimate
-# population_year identifies which Census year to match
-#
-# left_join() matches tax data with population by state and year
-# if_else() prevents division by zero or missing population
-# factor() orders the years chronologically on the graph
-
-tax_heatmap_data <- bind_rows(
-  annual_tax_data,
-  ltm_tax_data
-) |>
-  mutate(
-    population_year = if_else(
-      year_label == "2026 LTM",
-      "2025",
-      year_label
-    )
-  ) |>
-  left_join(
-    population_data,
-    by = c("state", "population_year" = "year")
-  ) |>
-  mutate(
-    taxes_per_capita = if_else(
-      !is.na(population) & population > 0,
-      total_taxes / population,
-      NA_real_
-    ),
-    year_label = factor(
-      year_label,
-      levels = c(as.character(2018:2025), "2026 LTM")
-    )
-  )
-
-
-# Sort states by their 2025 taxes per capita
-#
-# filter() selects the most recent complete calendar year
-# arrange() sorts states from lowest to highest
-# pull() extracts the ordered state names as a vector
-# setdiff() retains states without a 2025 tax observation
-# ggplot displays the last factor level at the top of the y-axis
-
-state_order <- tax_heatmap_data |>
-  filter(year_label == "2025") |>
-  arrange(taxes_per_capita) |>
-  pull(state)
-
-state_order <- c(
-  setdiff(sort(unique(tax_heatmap_data$state)), state_order),
-  state_order
 )
 
 
-# Inspect the LTM results for our four comparison states
-# All observations should include 12 months of tax collections
+# Step 12: State-Year Heatmap (A New Plot Type)
 
-tax_heatmap_data |>
-  filter(
-    state %in% c("NY", "NJ", "PA", "MI"),
-    year_label == "2026 LTM"
-  ) |>
-  select(
-    state,
-    year_label,
-    months_reported,
-    total_taxes,
-    population,
-    taxes_per_capita
+# Unlike the line charts, a heatmap uses color to communicate a
+# quantitative value for each combination of two categorical variables.
+# Here each cell contains total reported sports betting handle for a state-year.
+# Blank cells indicate no reported observations, not zero betting activity.
+# Annual totals for 2026 are incomplete (only January through August).
+state_year_heatmap <- sports |>
+  filter(is.finite(handle)) |>
+  group_by(state, year) |>
+  summarise(
+    months_reported = n_distinct(month),
+    annual_handle = sum(handle),
+    .groups = "drop"
   )
 
+# Inspect several example state-year totals before plotting.
+state_year_heatmap |>
+  filter(state %in% c("MI", "NJ", "NY", "PA"), year %in% c("2024", "2025")) |>
+  arrange(state, year)
 
-# Create the heatmap
-#
-# aes() maps year to x, state to y, and taxes per capita to fill
-# factor() applies our state ranking based on 2025
-# geom_tile() creates a colored rectangle for each state-year
-# scale_fill_gradient() creates a continuous color scale
-# Darker colors represent greater tax collections per resident
-# labs() adds chart and axis labels
-# theme_minimal() applies a clean visual style
-# panel.grid = element_blank() removes unnecessary gridlines
-
-ggplot(
-  data = tax_heatmap_data,
-  aes(
-    x = year_label,
-    y = factor(state, levels = state_order),
-    fill = taxes_per_capita
-  )
+# A heatmap uses geom_tile(), which was not one of our introductory charts.
+# The fill scale allows a comparison across all reporting states and years.
+heatmap_chart <- ggplot(
+  state_year_heatmap,
+  aes(x = year, y = state, fill = annual_handle)
 ) +
-  geom_tile(color = "white") +
-  scale_fill_gradient(
-    low = "lightyellow",
-    high = "darkblue",
-    name = "Taxes per\nResident ($)"
+  geom_tile(color = "white", linewidth = 0.2) +
+  scale_fill_viridis_c(
+    option = "D", labels = scales::label_dollar(scale_cut = scales::cut_short_scale())
   ) +
   labs(
-    title = "Sports Betting Taxes per Capita by State",
-    subtitle = "2018-2025 Calendar Years | LTM Through August 2026",
-    x = "Year",
+    title = "U.S. Sports Betting Handle by State and Reporting Year",
+    subtitle = "Calendar-year totals; 2026 is partial through August",
+    x = "Reporting Year",
     y = "State",
-    caption = "LTM = Sep 2025-Aug 2026; uses 2025 population and requires 12 reported months. Historical years may have partial reporting."
+    fill = "Annual Handle ($)",
+    caption = "Blank cells indicate missing reports. Partial years are not annualized."
   ) +
-  theme_minimal() +
-  theme(
-    panel.grid = element_blank()
-  )
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+print(heatmap_chart)
 
 
-# Step 13: Top 10 States by Sports Betting Taxes per Capita
+# Step 13: Annual Sports Betting Taxes Per Capita (2025)
 
-# Use the annual tax and population data created in Step 12
-# Select 2025 because it is the most recent complete calendar year
-# Only include states with 12 months of reported taxes
-# !is.na() excludes missing per-capita tax values
-#
-# slice_max() selects the observations with the largest values
-# order_by specifies the variable used for ranking
-# n = 10 selects the 10 highest-ranking states
-# with_ties = FALSE ensures exactly 10 states are selected
+# Per-capita taxes = total 2025 reported taxes / 2025 state population.
+# Require 12 distinct months with reported taxes for full-year comparability.
+# get_per_capita_data() uses Census population data embedded in helpers.R,
+# originally from NST-EST2025-ALLDATA.csv (U.S. Census Bureau).
+# These are population denominators, not estimates of betting participants.
+# The same helper is used by the Shiny Annual Per Capita chart.
+taxes_per_capita_2025 <- get_per_capita_data(
+  sports, selected_var = "taxes", selected_year = 2025L, min_months = 12L
+) |>
+  arrange(desc(per_capita))
 
-top_tax_states <- tax_heatmap_data |>
-  filter(
-    year_label == "2025",
-    months_reported == 12,
-    !is.na(taxes_per_capita)
-  ) |>
-  slice_max(
-    order_by = taxes_per_capita,
-    n = 10,
-    with_ties = FALSE
-  )
+# Show the exact top-ten amounts in a table.
+taxes_per_capita_2025 |>
+  select(state, months_reported, annual_amount, population, per_capita) |>
+  slice_head(n = 10)
 
-# Inspect the top 10 states and their taxes per capita
-top_tax_states |>
-  select(state, year_label, total_taxes, population, taxes_per_capita) |>
-  arrange(desc(taxes_per_capita))
-
-
-# Create a horizontal bar chart
-#
-# ggplot() initializes the graph
-# aes() maps state to the x-axis and taxes per capita to the y-axis
-# reorder() arranges states according to their taxes per capita
-# geom_col() creates bars using the actual numerical values
-# coord_flip() switches the axes to make the bars horizontal
-# scale_y_continuous() formats the values as dollars
-# labs() adds chart and axis labels
-# theme_minimal() applies a clean visual style
-
-ggplot(
-  data = top_tax_states,
-  aes(
-    x = reorder(state, taxes_per_capita),
-    y = taxes_per_capita
-  )
-) +
+# Compare each state's annual sports betting taxes per resident.
+taxes_per_capita_chart <- taxes_per_capita_2025 |>
+  slice_head(n = 10) |>
+  ggplot(aes(x = per_capita, y = reorder(state, per_capita))) +
   geom_col(fill = "steelblue") +
-  coord_flip() +
-  scale_y_continuous(
-    labels = scales::label_dollar()
-  ) +
+  scale_x_continuous(labels = scales::label_dollar()) +
   labs(
     title = "Top 10 States by Sports Betting Taxes per Capita",
-    subtitle = "Calendar Year 2025",
-    x = "State",
-    y = "Annual Taxes per Resident ($)",
-    caption = "Includes states with 12 reported months of taxes in 2025."
+    subtitle = "Calendar Year 2025 - 12 reported months required",
+    x = "Annual Sports Betting Taxes per Resident ($)",
+    y = "State",
+    caption = "2025 U.S. Census population estimates; partial-year states excluded."
   ) +
-  theme_minimal()
+  theme_minimal(base_size = 14)
+print(taxes_per_capita_chart)
+
+
+# Step 14: Annual Sports Betting Handle Per Capita (2025)
+
+# Calculate per-resident handle using the same population estimates.
+# This is market-level handle divided by population, NOT a measure of
+# actual dollars bet by an average individual resident.
+handle_per_capita_2025 <- get_per_capita_data(
+  sports, selected_var = "handle", selected_year = 2025L, min_months = 12L
+) |>
+  arrange(desc(per_capita))
+
+# Review exact top-ten dollar values.
+handle_per_capita_2025 |>
+  select(state, months_reported, annual_amount, population, per_capita) |>
+  slice_head(n = 10)
+
+handle_per_capita_chart <- handle_per_capita_2025 |>
+  slice_head(n = 10) |>
+  ggplot(aes(x = per_capita, y = reorder(state, per_capita))) +
+  geom_col(fill = "steelblue") +
+  scale_x_continuous(labels = scales::label_dollar()) +
+  labs(
+    title = "Top 10 States by Sports Betting Handle per Capita",
+    subtitle = "Calendar Year 2025 - 12 reported months required",
+    x = "Annual Sports Betting Handle per Resident ($)",
+    y = "State",
+    caption = "2025 U.S. Census population estimates; partial-year states excluded."
+  ) +
+  theme_minimal(base_size = 14)
+print(handle_per_capita_chart)
+
+
+# Step 15: Grouped Bar Chart - Mobile Versus Retail Handle Share
+
+# Show a multivariate grouped bar chart: state, channel and handle share.
+# Use annual dollar totals rather than averaging monthly percentages.
+# Only states with complete reported channel splits and 12 reported months
+# are included. The adjusted *_for_split columns are for composition only.
+channel_mix_2025 <- mobile_retail_summary |>
+  filter(
+    year == "2025",
+    months_reported == 12,
+    state %in% c("MI", "NJ", "NY", "PA"),
+    is.finite(mobile_pct),
+    is.finite(retail_pct)
+  ) |>
+  select(state, mobile_pct, retail_pct) |>
+  pivot_longer(
+    cols = c(mobile_pct, retail_pct),
+    names_to = "channel",
+    values_to = "share_pct"
+  ) |>
+  mutate(
+    channel = recode(
+      channel,
+      mobile_pct = "Mobile",
+      retail_pct = "Retail"
+    )
+  )
+
+channel_mix_chart <- ggplot(
+  channel_mix_2025,
+  aes(x = state, y = share_pct, fill = channel)
+) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::label_number(suffix = "%")) +
+  labs(
+    title = "Mobile Versus Retail Share of Sports Betting Handle",
+    subtitle = "Selected states, Calendar Year 2025",
+    x = "State",
+    y = "Share of Annual Handle (%)",
+    fill = "Channel",
+    caption = "Annual handle shares use adjusted channel-split values; missing values are not assumed zero."
+  ) +
+  theme_minimal(base_size = 14)
+print(channel_mix_chart)
+
+
+# Step 16: Quick Check of the Static Exploration Requirements
+
+# One-way and two-way tables: Step 4.
+# Numerical summaries by state/year: Step 5.
+# At least six plots: Steps 6-11, plus heatmap and per-capita charts.
+# Multivariate plots: stacked area, colored state lines, faceted boxplots,
+# heatmap, and grouped mobile/retail bar chart.
+# A less familiar plot type: geom_tile() heatmap in Step 12.
+# Faceting: facet_wrap() by state in Step 11.
+# Both this exploration.R and helpers.R belong in the GitHub repository.
 

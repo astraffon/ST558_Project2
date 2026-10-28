@@ -233,3 +233,173 @@ add_exploration_categories <- function(data) {
     )
 }
 
+
+
+# Step 3: Additional exploratory chart calculations
+
+# Build the cumulative state-level handle paths from the original EDA
+# Fill unreported months with zero for display only
+get_cumulative_handle_data <- function(data) {
+  if (nrow(data) == 0) {
+    return(tibble(
+      state = character(), month = as.Date(character()),
+      cumulative_handle = numeric()
+    ))
+  }
+
+  data |>
+    select(state, month, handle) |>
+    tidyr::complete(
+      state,
+      month = seq(min(data$month), max(data$month), by = "month")
+    ) |>
+    mutate(handle_for_plot = tidyr::replace_na(handle, 0)) |>
+    arrange(state, month) |>
+    group_by(state) |>
+    mutate(cumulative_handle = cumsum(handle_for_plot)) |>
+    ungroup()
+}
+
+
+# Aggregate total hold only where both handle and revenue are reported
+get_monthly_aggregate_hold <- function(data) {
+  data |>
+    filter(is.finite(handle), is.finite(revenue)) |>
+    group_by(month) |>
+    summarise(
+      states_reporting = n_distinct(state),
+      total_handle = sum(handle),
+      total_revenue = sum(revenue),
+      .groups = "drop"
+    ) |>
+    mutate(
+      combined_hold_pct = if_else(
+        total_handle > 0,
+        100 * total_revenue / total_handle,
+        NA_real_
+      )
+    )
+}
+
+
+# Mobile and retail proportions use the adjusted split columns
+# The source columns are joined back without changing applied_data()
+get_channel_share_data <- function(data, selected_year) {
+  original_split <- sports |>
+    select(state, month, mobile_for_split, retail_for_split)
+
+  data |>
+    left_join(original_split, by = c("state", "month")) |>
+    filter(
+      lubridate::year(month) == selected_year,
+      is.finite(handle),
+      is.finite(mobile_for_split),
+      is.finite(retail_for_split)
+    ) |>
+    group_by(state) |>
+    summarise(
+      total_handle = sum(handle),
+      mobile_handle = sum(mobile_for_split),
+      retail_handle = sum(retail_for_split),
+      months = n(),
+      .groups = "drop"
+    ) |>
+    filter(total_handle > 0) |>
+    transmute(
+      state,
+      Mobile = 100 * mobile_handle / total_handle,
+      Retail = 100 * retail_handle / total_handle
+    ) |>
+    pivot_longer(
+      cols = c(Mobile, Retail),
+      names_to = "channel",
+      values_to = "pct"
+    )
+}
+
+
+# Fallback annual state population estimates from U.S. Census Vintage 2025.
+# If the prepared merged CSV exists, it replaces these embedded 2020-2025 data.
+# The prepared CSV joins Census Vintage 2019 (2018-2019) with
+# Census Vintage 2025 (2020-2025), providing 2018-2025 coverage.
+# Population estimates reflect July 1 resident population.
+population_estimates <- tibble::tibble(
+  state = c("AK", "AL", "AR", "AZ", "CA", "CO", "CT", "DC", "DE", "FL", "GA", "HI", "IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN", "MO", "MS", "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WI", "WV", "WY"),
+  `2020` = c(732906, 5032962, 3014399, 7186647, 39527808, 5786873, 3579643, 670958, 991890, 21591325, 10732595, 1451130, 3191081, 1849328, 12795348, 6790290, 2938274, 4508271, 4652145, 6985320, 6178387, 1364546, 10072294, 5710562, 6155074, 2958385, 1087156, 10450215, 779612, 1963318, 1378752, 9270476, 2118446, 3116851, 20122262, 11798534, 3965243, 4243544, 12995576, 1096487, 5131992, 887808, 6927736, 29237895, 3283970, 8637303, 642965, 7726812, 5897371, 1791670, 577669),
+  `2021` = c(734590, 5050058, 3027127, 7274022, 39152927, 5814368, 3607765, 669637, 1005130, 21836698, 10793038, 1446909, 3199037, 1904855, 12703354, 6814223, 2938966, 4508348, 4628595, 6996721, 6176035, 1379009, 10042362, 5714055, 6172551, 2947603, 1106416, 10565503, 777977, 1964697, 1387907, 9266509, 2117300, 3148472, 19835345, 11761443, 3992760, 4254691, 13016628, 1097381, 5194346, 896303, 6966687, 29572672, 3339874, 8660007, 647238, 7744316, 5882128, 1785921, 579662),
+  `2022` = c(733659, 5076868, 3047429, 7370065, 39125347, 5853355, 3618707, 674501, 1020279, 22413989, 10929992, 1437812, 3201890, 1942951, 12609577, 6841491, 2938034, 4521238, 4600892, 7025465, 6183257, 1391585, 10043906, 5727565, 6179285, 2941237, 1121533, 10705768, 780191, 1972595, 1396647, 9298402, 2112859, 3177672, 19713025, 11764950, 4025327, 4245964, 12984655, 1098275, 5288957, 909156, 7063325, 30118002, 3393928, 8681038, 647614, 7786828, 5903472, 1774003, 581742),
+  `2023` = c(734654, 5117850, 3069856, 7452073, 39181667, 5912240, 3641369, 682559, 1035354, 22929248, 11063669, 1434950, 3214739, 1970497, 12633389, 6881373, 2949749, 4549953, 4598777, 7073479, 6204927, 1401992, 10062124, 5752998, 6205956, 2942470, 1130612, 10871849, 787071, 1988172, 1401530, 9395315, 2119349, 3211077, 19786543, 11808390, 4062716, 4250392, 13009406, 1101183, 5390798, 917739, 7153029, 30719247, 3449259, 8732034, 647722, 7838655, 5930350, 1770036, 584666),
+  `2024` = c(736537, 5163055, 3096080, 7556424, 39364774, 5988502, 3674449, 691310, 1050123, 23265838, 11204208, 1434952, 3230454, 2000872, 12703033, 6934754, 2965252, 4584046, 4614878, 7138560, 6245314, 1408438, 10099962, 5797405, 6243544, 2950172, 1137557, 11052061, 793387, 2005591, 1408518, 9506354, 2126774, 3253543, 20001419, 11860621, 4097758, 4265324, 13045848, 1110415, 5490316, 927110, 7251291, 31318578, 3502983, 8819642, 646521, 7927958, 5957168, 1767402, 586722),
+  `2025` = c(737270, 5193088, 3114791, 7623818, 39355309, 6012561, 3688496, 693645, 1059952, 23462518, 11302748, 1432820, 3238387, 2029733, 12719141, 6973333, 2977220, 4606864, 4618189, 7154084, 6265347, 1414874, 10127884, 5830405, 6270541, 2954160, 1144694, 11197968, 799358, 2018006, 1415342, 9548215, 2125498, 3282188, 20002427, 11900510, 4123288, 4273586, 13059432, 1114521, 5570274, 935094, 7315076, 31709821, 3538904, 8880107, 644663, 8001020, 5972787, 1766147, 588753)
+) |>
+  tidyr::pivot_longer(
+    cols = -state, names_to = "year", values_to = "population"
+  ) |>
+  dplyr::mutate(year = as.integer(year))
+
+
+# Use the project-prepared Census population file when it is present.
+# Expected columns: state (postal abbreviation), year, population.
+# We preserve the embedded 2020-2025 estimates as a fallback so that the
+# previously working app remains usable if the merged CSV is not yet copied.
+population_file <- "data/state_population_clean.csv"
+if (file.exists(population_file)) {
+  population_merged <- readr::read_csv(population_file, show_col_types = FALSE)
+
+  # Support either state or state_abbr in the user's prepared population file.
+  if (!"state" %in% names(population_merged) &&
+      "state_abbr" %in% names(population_merged)) {
+    population_merged <- dplyr::rename(population_merged, state = state_abbr)
+  }
+
+  needed_columns <- c("state", "year", "population")
+  if (!all(needed_columns %in% names(population_merged))) {
+    stop("data/state_population_clean.csv must have state, year, population columns.")
+  }
+
+  population_merged <- population_merged |>
+    dplyr::transmute(
+      state = trimws(as.character(state)),
+      year = as.integer(year),
+      population = as.numeric(population)
+    )
+
+  if (anyNA(population_merged) ||
+      any(population_merged$population <= 0) ||
+      anyDuplicated(population_merged[c("state", "year")])) {
+    stop("The merged population file has missing, nonpositive, or duplicate state-year values.")
+  }
+
+  population_estimates <- population_merged
+}
+
+# Used in the About tab, per-capita year selector, and chart help text.
+population_coverage <- paste0(
+  min(population_estimates$year), "–", max(population_estimates$year)
+)
+
+
+# Summarise eligible annual reported amounts per resident, using matched years
+get_per_capita_data <- function(data, selected_var, selected_year,
+                                min_months = 12L) {
+  data |>
+    filter(
+      lubridate::year(month) == selected_year,
+      is.finite(.data[[selected_var]])
+    ) |>
+    group_by(state) |>
+    summarise(
+      months_reported = n_distinct(month),
+      annual_amount = sum(.data[[selected_var]]),
+      .groups = "drop"
+    ) |>
+    left_join(
+      population_estimates |> filter(year == selected_year),
+      by = "state"
+    ) |>
+    filter(
+      months_reported >= min_months,
+      is.finite(population), population > 0
+    ) |>
+    mutate(per_capita = annual_amount / population)
+}

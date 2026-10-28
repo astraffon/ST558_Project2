@@ -49,6 +49,14 @@ category_vars <- c(
 )
 
 plot_choices <- c(
+  "Cumulative Handle by State - Stacked Area" = "cum_handle",
+  "Combined Monthly Hold - Line Chart" = "national_hold",
+  "Monthly Handle by State - Line Chart" = "monthly_handle",
+  "Monthly Revenue by State - Line Chart" = "monthly_revenue",
+  "Monthly Hold Distribution - Histogram" = "hold_hist",
+  "Annual Per Capita - State Ranking" = "per_capita",
+  "Monthly Hold by State and Year - Faceted Boxplot" = "faceted_hold",
+  "Mobile vs Retail Handle Share by State" = "channel_share",
   "Grouped Bar Chart - Channel Activity by Year" = "bar",
   "Histogram - Numerical Distribution" = "histogram",
   "Boxplot - Values by Reporting Year" = "boxplot",
@@ -57,17 +65,270 @@ plot_choices <- c(
   "Heatmap - State by Reporting Year" = "heatmap"
 )
 
+# Step 2B: Improve readability of labels across Additional Plots
+extra_plot_theme <- theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 14),
+    axis.title = element_text(size = 17),
+    axis.text = element_text(size = 14),
+    strip.text = element_text(size = 16, face = "bold"),
+    legend.title = element_text(size = 15),
+    legend.text = element_text(size = 14),
+    plot.caption = element_text(size = 12)
+  )
+
+# Step 2C: Examples of earlier static reports for the About tab
+# Shiny serves these images from the www/images folder.
+static_report_examples <- list(
+  list(
+    title = "LTM Sports Betting Taxes",
+    description = "State taxes ranked over the last twelve months",
+    src = "images/LTM.Tax.Rankings.10.26.26.jpg"
+  ),
+  list(
+    title = "LTM Sports Betting Handle",
+    description = "State handle rankings over the last twelve months",
+    src = "images/LTM.Handle.Rankings.10.26.26.jpg"
+  ),
+  list(
+    title = "LTM Gross Revenue",
+    description = "State gross revenue rankings over the last twelve months",
+    src = "images/LTM.GGR.Rankings.10.26.26.jpg"
+  ),
+  list(
+    title = "Monthly Hold Boxplots",
+    description = "Monthly distribution of sportsbook hold",
+    src = "images/Monthly.Hold.Boxplot.12.19.24.png"
+  ),
+  list(
+    title = "Annual National Hold",
+    description = "National annual and partial-year hold comparison",
+    src = "images/Annual.Hold.10.26.26.jpg"
+  ),
+  list(
+    title = "Mobile Handle Per Adult",
+    description = "Rolling mobile handle by market maturity",
+    src = "images/Ramps.jpg"
+  )
+)
+
+# Step 2D: Familiar sportsbook brands provide context for the About tab
+sportsbook_brand_image <- "images/sportsbook_logos.png"
+
 # Step 3: Define the UI
 ui <- fluidPage(
   titlePanel("U.S. Sports Betting Explorer"),
   tabsetPanel(
+    # Step 3A: About tab - app overview, instructions, sources, and image
     tabPanel(
       "About",
-      h3("About This Application"),
-      p("Explore historical U.S. sports betting data, including handle, revenue, taxes, and hold percentages."),
-      p("The dataset contains monthly state-level observations from 2018 through August 2026."),
-      p("Data & Summaries has shared filters for the data table and numerical summaries."),
-      p("Correlation and Time Series have independent controls under Data Exploration.")
+      fluidRow(
+        column(
+          width = 7,
+          h3("U.S. Sports Betting Explorer"),
+          h4("Background and purpose"),
+          p(
+            "In 2018, the U.S. Supreme Court struck down the Professional and Amateur ",
+            "Sports Protection Act of 1992 (PASPA), removing the federal restriction ",
+            "that had prevented most states from authorizing sports betting within ",
+            "their borders. Before this decision, Nevada was the only state where ",
+            "legal, regulated sports betting was broadly available."
+          ),
+          p(
+            "Since the ruling, sports betting has expanded to dozens of states, ",
+            "providing legal access to more than half of the U.S. population. ",
+            "State gaming regulators generally publish sports betting results ",
+            "on a monthly basis, typically reporting activity from a prior ",
+            "month. The detail, definitions, and availability of these public ",
+            "reports vary by jurisdiction."
+          ),
+          p(
+            "I have personally collected and organized the data presented in ",
+            "this app for my personal and professional work as a sports betting ",
+            "industry analyst. Using the results generally published by state ",
+            "gaming regulators, I have compiled a centralized dataset so users ",
+            "can explore trends, compare jurisdictions, and better understand ",
+            "the growth of regulated sports betting in the United States."
+          ),
+          p(
+            "Rather than relying on static data tables and charts that must be ",
+            "updated manually, I developed this interactive app to enhance ",
+            "the experience for visitors to my website, ",
+            tags$a(
+              "iGaming Analyst",
+              href = "https://www.igaminganalyst.com/",
+              target = "_blank", rel = "noopener noreferrer"
+            ),
+            ". It provides a flexible way to explore, filter, and compare ",
+            "publicly reported sports betting data without depending on ",
+            "separately maintained static charts."
+          ),
+          h4("What you can explore"),
+          p(
+            "Compare handle (wagers placed), operator revenue, taxes, hold ",
+            "percentages, mobile versus retail activity, and per-capita measures ",
+            "using interactive charts and summary tables."
+          ),
+          h4("Data at a glance"),
+          p(
+            strong("Coverage: "),
+            paste0(
+              dplyr::n_distinct(sports$state), " reporting jurisdictions; ",
+              format(min(sports$month), "%B %Y"), " through ",
+              format(max(sports$month), "%B %Y"), "; ",
+              format(nrow(sports), big.mark = ",", scientific = FALSE),
+              " state-month observations."
+            )
+          ),
+          p(
+            "The underlying sports betting figures generally come from monthly ",
+            "public reports issued by state gaming regulators. I collected and ",
+            "organized these figures into the analytical dataset used here. ",
+            "Coverage differs by jurisdiction and measure; a blank value means ",
+            "unreported or unavailable, not necessarily zero. Some reported ",
+            "financial adjustments are negative."
+          ),
+          h4("How to use the app"),
+          tags$ol(
+            tags$li(
+              strong("Choose filters under Data & Summaries. "),
+              "Select states, reporting years, and optionally up to two numeric ranges. ",
+              "Click Apply Filters to update the data table, summaries, and Additional Plots."
+            ),
+            tags$li(
+              strong("Explore the tabs. "),
+              "Data Table lets you browse and download the filtered observations; ",
+              "Numerical Summaries calculates descriptive statistics; ",
+              "Categorical Summaries creates one-way and two-way contingency tables; ",
+              "Additional Plots displays customizable charts, including per-capita rankings."
+            ),
+            tags$li(
+              strong("Use Data Exploration for comparisons over time. "),
+              "Correlation compares two selected state-variable series; ",
+              "Time Series displays trends, reporting-period aggregations, and year-over-year ",
+              "changes. These two tools have their own controls and are independent ",
+              "of the Data & Summaries filters."
+            ),
+            tags$li(
+              strong("Inspect chart values. "),
+              "Hover over interactive charts to view exact amounts and labels."
+            )
+          ),
+          h4("Definitions and interpretation"),
+          tags$ul(
+            tags$li(strong("Handle: "), "the dollar amount wagered, not operator revenue."),
+            tags$li(strong("Revenue: "), "reported sportsbook revenue; taxes are a separate reported field."),
+            tags$li(strong("Hold (%): "), "100 × revenue / handle where the denominator is positive. Aggregated hold is calculated using combined dollars, not an unweighted average of state rates."),
+            tags$li(strong("Per capita: "), "an annual financial total divided by the jurisdiction's resident population. This is not the average amount wagered per bettor. Population comparisons cover ", population_coverage, "; partial-year totals are not annualized.")
+          )
+        ),
+        column(
+          width = 5,
+          # Familiar sportsbook brands provide visual context for visitors.
+          h4("Familiar sports betting brands"),
+          tags$img(
+            src = sportsbook_brand_image,
+            alt = "Collage of familiar sportsbook brand logos",
+            style = paste0(
+              "display:block;width:100%;max-width:640px;height:auto;",
+              "border-radius:7px;border:1px solid #ddd;"
+            )
+          ),
+          p(
+            "Brands shown as visual context only; no affiliation or endorsement is implied.",
+            style = "font-size:11px;color:#666;margin-top:7px;margin-bottom:21px;"
+          ),
+          h4("Examples of my previous static reports"),
+          p(
+            "These are examples of the individually maintained charts used in my ",
+            "industry analysis. This interactive app is intended to reduce the ",
+            "need to recreate similar visualizations manually. ",
+            strong("Click any example to enlarge it.")
+          ),
+          tags$div(
+            style = paste0(
+              "display:grid;grid-template-columns:repeat(3,minmax(0,1fr));",
+              "gap:10px;margin:12px 0 22px 0;"
+            ),
+            lapply(seq_along(static_report_examples), function(i) {
+              report <- static_report_examples[[i]]
+              tags$div(
+                style = paste0(
+                  "border:1px solid #ddd;border-radius:7px;",
+                  "padding:6px;background:#fff;min-width:0;"
+                ),
+                actionLink(
+                  inputId = paste0("about_report_", i),
+                  label = tags$img(
+                    src = report$src,
+                    alt = report$title,
+                    style = "width:100%;height:auto;display:block;border-radius:3px;"
+                  ),
+                  style = "display:block;"
+                ),
+                tags$div(
+                  report$title,
+                  style = "font-size:12px;font-weight:bold;margin-top:7px;"
+                )
+              )
+            })
+          ),
+          wellPanel(
+            h4("Data sources and background"),
+            p(
+              strong("Sports betting: "),
+              "Underlying data are generally reported monthly by state gaming ",
+              "regulators and were personally collected and organized into ",
+              "the compiled workbook ",
+              tags$code("Sports_Betting_State_Data.xlsx"),
+              " (Sports worksheet), then prepared into ",
+              tags$code("data/sports_betting_clean.csv"),
+              ". The reference below provides public U.S. industry context; ",
+              "it is not a direct source for the compiled dataset."
+            ),
+            p(
+              tags$a(
+                "American Gaming Association — Commercial Gaming Revenue Tracker",
+                href = "https://americangaming.org/resources/commercial-gaming-revenue-tracker/",
+                target = "_blank", rel = "noopener noreferrer"
+              )
+            ),
+            p(
+              strong("Population: "),
+              "U.S. Census Bureau annual state resident population estimates from ",
+              "two historical vintages: Vintage 2019 ",
+              "(NST-EST2019-ALLDATA) for 2018–2019 and Vintage 2025 ",
+              "(NST-EST2025-ALLDATA) for 2020–2025. ",
+              "These were prepared as a combined 2018–2025 population dataset ",
+              "for state-level per-capita comparisons."
+            ),
+            p(
+              tags$a(
+                "U.S. Census Bureau — Vintage 2019 Population Estimates",
+                href = "https://www.census.gov/newsroom/press-kits/2019/national-state-estimates.html",
+                target = "_blank", rel = "noopener noreferrer"
+              ),
+              " | ",
+              tags$a(
+                "Vintage 2025 Population Estimates",
+                href = "https://www.census.gov/data/datasets/time-series/demo/popest/2020s-state-total.html",
+                target = "_blank", rel = "noopener noreferrer"
+              )
+            ),
+            p(
+              style = "font-size:12px; color:#555;",
+              "The two periods come from separate Census vintages and may not be ",
+              "strictly comparable across the 2019–2020 boundary. "
+            ),
+            p(
+              style = "font-size:12px; color:#555;",
+              "Source coverage and definitions vary by jurisdiction. This app is ",
+              "for descriptive exploration, not a complete official national census."
+            )
+          )
+        )
+      )
     ),
 
     # Data Table and Numerical Summaries share these filters only
@@ -112,7 +373,7 @@ ui <- fluidPage(
           ),
           helpText("Exact values override their corresponding slider endpoints."),
           actionButton("apply_filters", "Apply Filters"),
-          helpText("Only the Data Table and Numerical Summaries use these filters.")
+          helpText("These filters control the Data Table, Numerical Summaries, Categorical Summaries, and Additional Plots only.")
         ),
         mainPanel(
           h3("Data and Summary Statistics"),
@@ -174,13 +435,66 @@ ui <- fluidPage(
             tabPanel(
               "Additional Plots",
               selectInput(
-                "graph_type", "Plot Type", plot_choices, selected = "bar"
+                "graph_type", "Plot Type", plot_choices, selected = "bar", width = "420px"
               ),
               conditionalPanel(
-                condition = "input.graph_type != 'bar'",
+                condition = paste0(
+                  "input.graph_type != 'bar' && ",
+                  "input.graph_type != 'cum_handle' && ",
+                  "input.graph_type != 'national_hold' && ",
+                  "input.graph_type != 'faceted_hold' && ",
+                  "input.graph_type != 'channel_share' && ",
+                  "input.graph_type != 'monthly_handle' && ",
+                  "input.graph_type != 'monthly_revenue' && ",
+                  "input.graph_type != 'hold_hist' && ",
+                  "input.graph_type != 'per_capita'"
+                ),
                 selectInput(
                   "graph_var", "Numerical Variable", numeric_vars,
                   selected = "handle"
+                )
+              ),
+              conditionalPanel(
+                condition = "input.graph_type == 'channel_share'",
+                selectInput(
+                  "graph_channel_year", "Reporting Year",
+                  choices = as.character(sort(unique(lubridate::year(sports$month)))),
+                  selected = "2025"
+                )
+              ),
+              # Per-capita comparisons use Census annual state population estimates
+              conditionalPanel(
+                condition = "input.graph_type == 'per_capita'",
+                selectInput(
+                  "graph_percap_metric", "Annual Measure",
+                  choices = c(
+                    "Taxes ($)" = "taxes",
+                    "Total Handle ($)" = "handle",
+                    "Total Revenue ($)" = "revenue",
+                    "Taxable Revenue ($)" = "taxable_revenue",
+                    "Mobile Handle ($)" = "handle_mobile",
+                    "Retail Handle ($)" = "handle_retail"
+                  ),
+                  selected = "taxes"
+                ),
+                selectInput(
+                  "graph_percap_year", "Reporting Year",
+                  choices = as.character(sort(unique(population_estimates$year))),
+                  selected = "2025"
+                ),
+                selectInput(
+                  "graph_percap_top", "States to Display",
+                  choices = c("Top 10" = "10", "Top 20" = "20",
+                              "All Selected States" = "all"),
+                  selected = "10"
+                ),
+                checkboxInput(
+                  "graph_percap_full_year", "Require 12 reported months",
+                  value = TRUE
+                ),
+                helpText(
+                  "Per-capita values use U.S. Census annual population estimates",
+                  paste0("for ", population_coverage, ". Partial-year totals are not annualized.")
                 )
               ),
               conditionalPanel(
@@ -197,7 +511,7 @@ ui <- fluidPage(
                   selected = "reporting_year"
                 )
               ),
-              plotOutput("extra_plot", height = "590px"),
+              uiOutput("extra_plot_ui"),
               textOutput("extra_note")
             )
           )
@@ -233,7 +547,7 @@ ui <- fluidPage(
             ),
             mainPanel(
               h3("Correlation Between Selected Variables"),
-              plotOutput("corr_plot", height = "450px"),
+              plotlyOutput("corr_plot", height = "450px"),
               textOutput("corr_result"),
               uiOutput("market_note")
             )
@@ -275,6 +589,24 @@ ui <- fluidPage(
 
 # Step 4: Define the server
 server <- function(input, output, session) {
+  # Step 4A: Enlarge an earlier static chart when its thumbnail is clicked
+  lapply(seq_along(static_report_examples), function(i) {
+    observeEvent(input[[paste0("about_report_", i)]], {
+      report <- static_report_examples[[i]]
+      showModal(modalDialog(
+        title = report$title,
+        tags$img(
+          src = report$src,
+          alt = report$title,
+          style = "display:block;width:100%;height:auto;"
+        ),
+        p(report$description, style = "margin-top:10px;color:#555;"),
+        size = "l",
+        easyClose = TRUE,
+        footer = modalButton("Close")
+      ))
+    })
+  })
 
   # Data & Summaries filters (do not affect Correlation or Time Series)
   state_year_data <- reactive({
@@ -523,10 +855,26 @@ server <- function(input, output, session) {
       mutate(Percent = round(100 * Observations / sum(Observations), 1)) |>
       arrange(desc(Observations))
 
+    # Add an overall total without changing the underlying observations
+    table_data <- bind_rows(
+      table_data,
+      tibble(
+        Category = "Total",
+        Observations = sum(table_data$Observations),
+        Percent = 100
+      )
+    )
+
+    # Bold the complete Total row, including its numerical values
     DT::datatable(
       table_data, rownames = FALSE,
-      options = list(pageLength = 10, scrollX = TRUE)
-    )
+      options = list(pageLength = 50, scrollX = TRUE, ordering = FALSE)
+    ) |>
+      DT::formatStyle(
+        columns = "Category",
+        target = "row",
+        fontWeight = DT::styleEqual("Total", "bold")
+      )
   })
 
   output$cat_two_table <- DT::renderDT({
@@ -550,31 +898,354 @@ server <- function(input, output, session) {
       ) |>
       arrange(Category)
 
+    # Add a total for each category row
+    year_or_category_cols <- setdiff(names(table_data), "Category")
+    table_data$Total <- rowSums(
+      as.matrix(table_data[, year_or_category_cols, drop = FALSE])
+    )
+
+    # Add totals for each column and the overall grand total
+    total_row <- table_data |>
+      summarise(across(-Category, ~ sum(.x, na.rm = TRUE))) |>
+      mutate(Category = "Total", .before = 1)
+
+    table_data <- bind_rows(table_data, total_row)
+
+    # Bold the complete Total row, including its numerical values
     DT::datatable(
       table_data, rownames = FALSE,
-      options = list(pageLength = 10, scrollX = TRUE)
+      options = list(pageLength = 50, scrollX = TRUE, ordering = FALSE)
+    ) |>
+      DT::formatStyle(
+        columns = "Category",
+        target = "row",
+        fontWeight = DT::styleEqual("Total", "bold")
+      )
+  })
+
+  # Choose a readable height for plots with many states
+  output$extra_plot_ui <- renderUI({
+    req(input$graph_type)
+    states_n <- dplyr::n_distinct(applied_data()$state)
+
+    height <- if (input$graph_type == "faceted_hold") {
+      max(590, ceiling(states_n / 4) * 225)
+    } else if (input$graph_type == "channel_share") {
+      max(590, states_n * 25 + 140)
+    } else if (input$graph_type == "per_capita") {
+      n_bars <- if (identical(input$graph_percap_top, "all")) {
+        states_n
+      } else if (!is.null(input$graph_percap_top)) {
+        min(states_n, as.integer(input$graph_percap_top))
+      } else {
+        10L
+      }
+      max(590, n_bars * 30 + 160)
+    } else {
+      590
+    }
+
+    plotlyOutput("extra_plot", height = paste0(height, "px"))
+  })
+
+
+  # Choose the reporting year for the channel composition chart
+  observeEvent(applied_data(), {
+    years <- sort(unique(lubridate::year(applied_data()$month)))
+    if (length(years) > 0) {
+      current <- isolate(input$graph_channel_year)
+      selected <- if (!is.null(current) &&
+                      current %in% as.character(years)) {
+        current
+      } else {
+        as.character(max(years))
+      }
+      updateSelectInput(
+        session, "graph_channel_year",
+        choices = as.character(years), selected = selected
+      )
+    }
+  })
+
+
+  # Population-normalized state-year observations from applied filters
+  percap_plot_data <- reactive({
+    req(input$graph_percap_metric, input$graph_percap_year)
+    threshold <- if (isTRUE(input$graph_percap_full_year)) 12L else 1L
+    get_per_capita_data(
+      exploration_data(),
+      input$graph_percap_metric,
+      as.integer(input$graph_percap_year),
+      min_months = threshold
     )
   })
 
-  # Create six plot variations with suitable data and labels
-  output$extra_plot <- renderPlot({
+  # Restrict per-capita year choices to years in the filtered dataset
+  # and years for which matching annual population estimates are available
+  observeEvent(applied_data(), {
+    eligible_years <- intersect(
+      sort(unique(lubridate::year(applied_data()$month))),
+      sort(unique(population_estimates$year))
+    )
+    current <- isolate(input$graph_percap_year)
+    selected <- if (!is.null(current) &&
+                    as.integer(current) %in% eligible_years) {
+      current
+    } else if (length(eligible_years) > 0) {
+      as.character(max(eligible_years))
+    } else {
+      character(0)
+    }
+    updateSelectInput(
+      session, "graph_percap_year",
+      choices = as.character(eligible_years), selected = selected
+    )
+  })
+
+  # Graphical exploration based on the original static EDA charts
+  extra_plot_gg <- reactive({
     req(input$graph_type)
     data <- exploration_data()
     validate(need(nrow(data) > 0, "No observations match the filters."))
 
+    # Original EDA: monthly handle and revenue comparisons by state
+    if (input$graph_type %in% c("monthly_handle", "monthly_revenue")) {
+      variable <- if (input$graph_type == "monthly_handle") "handle" else "revenue"
+      label <- if (variable == "handle") "Handle" else "Revenue"
+      scale_divisor <- if (variable == "handle") 1e9 else 1e6
+      unit <- if (variable == "handle") "Billions" else "Millions"
+      plot_data <- data |>
+        filter(is.finite(.data[[variable]])) |>
+        mutate(hover_text = paste0(
+          "State: ", state,
+          "<br>Month: ", format(month, "%b %Y"),
+          "<br>", label, ": $",
+          formatC(.data[[variable]], format = "f", digits = 2, big.mark = ",")
+        ))
+      validate(
+        need(nrow(plot_data) > 0, "No reported data for these filters."),
+        need(n_distinct(plot_data$state) <= 12,
+             "For readable state lines, choose up to 12 states in Dataset Filters.")
+      )
+      return(
+        ggplot(plot_data,
+               aes(x = month, y = .data[[variable]] / scale_divisor,
+                   color = state, group = state, text = hover_text)) +
+          geom_line(linewidth = 0.9) +
+          scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
+          labs(
+            title = paste("Monthly Sports Betting", label, "by State"),
+            subtitle = "Selected states and reporting months",
+            x = "Reporting Month", y = paste0(label, " ($ ", unit, ")"),
+            color = "State"
+          ) +
+          extra_plot_theme +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      )
+    }
+
+    # Original EDA: the distribution of monthly hold percentages
+    if (input$graph_type == "hold_hist") {
+      plot_data <- data |>
+        filter(is.finite(handle), handle > 0, is.finite(hold_total))
+      validate(need(nrow(plot_data) > 0,
+                    "No reported monthly hold values for these filters."))
+      return(
+        ggplot(plot_data, aes(x = hold_total)) +
+          geom_histogram(binwidth = 2, boundary = 0,
+                         color = "white", fill = "grey40") +
+          labs(
+            title = "Distribution of Monthly Sports Betting Hold Percentages",
+            subtitle = "Each observation represents one state-month",
+            x = "Monthly Hold (%)", y = "Frequency (State-Months)"
+          ) +
+          extra_plot_theme
+      )
+    }
+
+    # Annual state-level financial measures divided by Census population
+    if (input$graph_type == "per_capita") {
+      req(input$graph_percap_top)
+      plot_data <- percap_plot_data() |>
+        arrange(desc(per_capita))
+      if (input$graph_percap_top != "all") {
+        plot_data <- head(plot_data, as.integer(input$graph_percap_top))
+      }
+      validate(need(nrow(plot_data) > 0,
+                    paste(
+                      "No eligible state-year data. Population is available for",
+                      population_coverage,
+                      "; try another year or disable the 12-month requirement."
+                    )))
+      metric_label <- names(numeric_vars)[numeric_vars == input$graph_percap_metric]
+      plot_data <- plot_data |>
+        mutate(hover_text = paste0(
+          "State: ", state, "<br>",
+          metric_label, " per resident: $",
+          formatC(per_capita, format = "f", digits = 2, big.mark = ",")
+        ))
+      return(
+        ggplot(plot_data,
+               aes(x = reorder(state, per_capita), y = per_capita,
+                   text = hover_text)) +
+          geom_col(fill = "steelblue") +
+          coord_flip() +
+          scale_y_continuous(labels = scales::label_dollar(accuracy = 1)) +
+          labs(
+            title = paste("Sports Betting", metric_label, "Per Capita by State"),
+            subtitle = paste(
+              "Calendar Year", input$graph_percap_year,
+              if (isTRUE(input$graph_percap_full_year))
+                "- 12 reported months required" else
+                "- partial-year reports may be included"
+            ),
+            x = "State", y = "Reported Dollars per Resident ($)",
+            caption = paste(
+              "U.S. Census Bureau annual population estimates;",
+              "reported totals are divided by same-year population."
+            )
+          ) +
+          extra_plot_theme
+      )
+    }
+
+    # Original EDA Step 6: cumulative state contributions to reported handle
+    if (input$graph_type == "cum_handle") {
+      plot_data <- get_cumulative_handle_data(data) |>
+        mutate(hover_text = paste0(
+          "State: ", state, "<br>Month: ", format(month, "%b %Y"),
+          "<br>Cumulative state handle: $",
+          formatC(cumulative_handle, format = "f", digits = 2, big.mark = ",")
+        ))
+      validate(need(nrow(plot_data) > 0, "No reported handle available."))
+
+      return(
+        ggplot(plot_data,
+               aes(x = month, y = cumulative_handle / 1e9,
+                   fill = state, text = hover_text)) +
+          geom_area() +
+          scale_x_date(
+            date_breaks = if (as.numeric(diff(range(plot_data$month))) > 365 * 3)
+              "1 year" else "6 months",
+            date_labels = "%b %Y",
+            limits = range(plot_data$month)
+          ) +
+          labs(
+            title = "Cumulative Reported Sports Betting Handle by State",
+            subtitle = "Selected jurisdictions and reporting months",
+            x = "Reporting Month", y = "Cumulative Handle ($ Billions)",
+            fill = "State",
+            caption = paste(
+              "Missing or excluded state-months contribute zero to",
+              "the plotted cumulative path; original data are unchanged."
+            )
+          ) +
+          extra_plot_theme
+      )
+    }
+
+    # Original EDA Step 7: combined monthly hold, weighted by handle
+    if (input$graph_type == "national_hold") {
+      plot_data <- get_monthly_aggregate_hold(data) |>
+        mutate(hover_text = paste0(
+          "Month: ", format(month, "%b %Y"),
+          "<br>Combined hold: ",
+          formatC(combined_hold_pct, format = "f", digits = 2, big.mark = ","), "%"
+        ))
+      validate(need(
+        nrow(plot_data) > 0 && any(is.finite(plot_data$combined_hold_pct)),
+        "No months have a valid combined handle and revenue."
+      ))
+      return(
+        ggplot(plot_data,
+               aes(x = month, y = combined_hold_pct, text = hover_text)) +
+          geom_line(color = "steelblue", linewidth = 1, na.rm = TRUE) +
+          scale_x_date(
+            date_breaks = if (as.numeric(diff(range(plot_data$month))) > 365 * 3)
+              "1 year" else "6 months",
+            date_labels = "%b %Y",
+            limits = range(plot_data$month)
+          ) +
+          scale_y_continuous(labels = scales::label_number(suffix = "%")) +
+          labs(
+            title = "Combined Monthly Sports Betting Hold",
+            subtitle = "Selected states; revenue divided by handle",
+            x = "Reporting Month", y = "Combined Hold (%)",
+            caption = "Only state-months with both handle and revenue are included."
+          ) +
+          extra_plot_theme
+      )
+    }
+
+    # Original EDA Step 11: monthly hold with state facets and jitter
+    if (input$graph_type == "faceted_hold") {
+      plot_data <- data |>
+        filter(is.finite(handle), handle > 0, is.finite(hold_total))
+      validate(need(nrow(plot_data) > 0,
+                    "No valid monthly total hold values for these filters."))
+      return(
+        ggplot(plot_data,
+               aes(x = reporting_year, y = hold_total)) +
+          geom_boxplot(fill = "lightblue", outlier.shape = NA) +
+          geom_jitter(width = 0.12, alpha = 0.4, size = 1) +
+          facet_wrap(~ state, ncol = 4) +
+          labs(
+            title = "Monthly Hold Percentage by State and Year",
+            x = "Reporting Year", y = "Monthly Hold (%)",
+            caption = "Each point is one reported state-month; partial years remain partial."
+          ) +
+          extra_plot_theme +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      )
+    }
+
+    # Original EDA Step 5B: state-level mobile/retail handle shares
+    if (input$graph_type == "channel_share") {
+      req(input$graph_channel_year)
+      plot_data <- get_channel_share_data(
+        data, as.integer(input$graph_channel_year)
+      ) |>
+        mutate(hover_text = paste0(
+          "State: ", state, "<br>Channel: ", channel,
+          "<br>Share: ",
+          formatC(pct, format = "f", digits = 2, big.mark = ","), "%"
+        ))
+      validate(need(nrow(plot_data) > 0,
+                    "No channel split data for that year and filter selection."))
+      return(
+        ggplot(plot_data,
+               aes(x = state, y = pct, fill = channel,
+                   text = hover_text)) +
+          geom_col() +
+          coord_flip() +
+          scale_y_continuous(labels = scales::label_number(suffix = "%")) +
+          labs(
+            title = paste("Mobile and Retail Handle Share -", input$graph_channel_year),
+            subtitle = "Channel totals divided by reported total handle",
+            x = "State", y = "Share of Handle (%)", fill = "Channel",
+            caption = "Calculated from available months; partial years are not annualized."
+          ) +
+          extra_plot_theme
+      )
+    }
+
     if (input$graph_type == "bar") {
       counts <- data |>
-        count(reporting_year, channel_status, name = "Observations")
+        count(reporting_year, channel_status, name = "Observations") |>
+        mutate(hover_text = paste0(
+          "Year: ", reporting_year, "<br>Channel status: ", channel_status,
+          "<br>Observations: ", Observations
+        ))
       return(
         ggplot(counts, aes(x = reporting_year, y = Observations,
-                           fill = channel_status)) +
+                           fill = channel_status, text = hover_text)) +
           geom_col(position = "dodge") +
           labs(
             title = "Monthly Observations by Year and Channel Activity",
             x = "Reporting Year", y = "Number of State-Months",
             fill = "Positive Channel Activity"
           ) +
-          theme_minimal()
+          extra_plot_theme
       )
     }
 
@@ -596,7 +1267,7 @@ server <- function(input, output, session) {
                          color = "white") +
           labs(title = paste("Distribution of", label),
                x = label, y = "Number of State-Months") +
-          theme_minimal()
+          extra_plot_theme
       )
     }
 
@@ -609,7 +1280,7 @@ server <- function(input, output, session) {
           guides(fill = "none") +
           labs(title = paste(label, "by Reporting Year"),
                x = "Reporting Year", y = label) +
-          theme_minimal()
+          extra_plot_theme
       )
     }
 
@@ -629,7 +1300,7 @@ server <- function(input, output, session) {
           geom_density(linewidth = 0.9) +
           labs(title = paste("Distribution of", label, "by Year"),
                x = label, y = "Density", color = "Reporting Year") +
-          theme_minimal()
+          extra_plot_theme
       )
     }
 
@@ -650,7 +1321,7 @@ server <- function(input, output, session) {
           labs(title = paste("Distribution of", label, "by",
                              if (input$graph_facet == "state") "State" else "Year"),
                x = label, y = "Number of State-Months") +
-          theme_minimal()
+          extra_plot_theme
       )
     }
 
@@ -687,9 +1358,20 @@ server <- function(input, output, session) {
           summarise(amount = sum(.data[[var]]), .groups = "drop")
       }
 
+      heat_data <- heat_data |>
+        mutate(hover_text = paste0(
+          "State: ", state, "<br>Year: ", reporting_year,
+          "<br>", label, ": ",
+          if (var %in% hold_vars) "" else "$",
+          ifelse(is.finite(amount),
+                 formatC(amount, format = "f", digits = 2, big.mark = ","),
+                 "Not reported"),
+          if (var %in% hold_vars) "%" else ""
+        ))
       return(
         ggplot(heat_data,
-               aes(x = reporting_year, y = state, fill = amount)) +
+               aes(x = reporting_year, y = state,
+                   fill = amount, text = hover_text)) +
           geom_tile(color = "white", linewidth = 0.25) +
           scale_fill_viridis_c(
             labels = scales::label_number(
@@ -700,15 +1382,83 @@ server <- function(input, output, session) {
           ) +
           labs(title = paste("State-Year Heatmap:", label),
                x = "Reporting Year", y = "State", fill = label) +
-          theme_minimal() +
+          extra_plot_theme +
           theme(panel.grid = element_blank(),
                 axis.text.x = element_text(angle = 45, hjust = 1))
       )
     }
   })
 
+  # Step 4A: Convert Additional Plots to interactive charts with hover labels.
+  # Keep ggplot calculations in extra_plot_gg() and use Plotly only for display.
+  output$extra_plot <- renderPlotly({
+    chart <- extra_plot_gg()
+    custom_hover_types <- c(
+      "per_capita", "monthly_handle", "monthly_revenue", "cum_handle",
+      "national_hold", "channel_share", "bar", "heatmap"
+    )
+    hover_items <- if (input$graph_type %in% custom_hover_types) {
+      "text"
+    } else {
+      "all"
+    }
+    plotly::ggplotly(chart, tooltip = hover_items) |>
+      plotly::layout(hovermode = "closest") |>
+      plotly::config(displaylogo = FALSE, responsive = TRUE)
+  })
+
   output$extra_note <- renderText({
     req(input$graph_type)
+    if (input$graph_type == "monthly_handle" ||
+        input$graph_type == "monthly_revenue") {
+      return(paste(
+        "Original state-level monthly time-series view from exploration.R.",
+        "All selected months and states come from the last Apply Filters click."
+      ))
+    }
+    if (input$graph_type == "hold_hist") {
+      return(paste(
+        "Distribution of reported state-month hold percentages where total",
+        "handle is positive. Negative reported hold values are retained."
+      ))
+    }
+    if (input$graph_type == "per_capita") {
+      return(paste(
+        "Annual financial amount divided by same-year state population.",
+        "Population estimates derive from Census Vintages 2019 and 2025.",
+        paste0("Available years: ", population_coverage, "."),
+        "If 12 months are required, partial years are excluded.",
+        "Otherwise, partial-year reported totals are not annualized."
+      ))
+    }
+    if (input$graph_type == "cum_handle") {
+      return(paste(
+        "Based on the cumulative stacked area chart in exploration.R.",
+        "Cumulative lines are stacked across states; months excluded",
+        "by the applied filters do not contribute to the running total."
+      ))
+    }
+    if (input$graph_type == "national_hold") {
+      return(paste(
+        "Based on the aggregate hold chart in exploration.R.",
+        "This is a handle-weighted hold rate, not the average of state hold percentages.",
+        "The contributing states may differ between months."
+      ))
+    }
+    if (input$graph_type == "faceted_hold") {
+      return(paste(
+        "Based on the faceted hold boxplots in exploration.R.",
+        "Each dot represents a monthly observation; negative hold values",
+        "remain included when total handle is positive."
+      ))
+    }
+    if (input$graph_type == "channel_share") {
+      return(paste(
+        "Based on the mobile-retail composition summary in exploration.R.",
+        "The adjusted split columns are used only for this composition chart.",
+        "A state may have less than 12 months of data in a year."
+      ))
+    }
     if (input$graph_type == "bar") {
       return(paste(
         "Counts show months with positive retail/mobile handle by channel.",
@@ -811,7 +1561,7 @@ server <- function(input, output, session) {
     result
   })
 
-  output$corr_plot <- renderPlot({
+  output$corr_plot <- renderPlotly({
     result <- corr_data()
     axis_label <- function(s, var) {
       label <- names(numeric_vars)[numeric_vars == var]
@@ -821,8 +1571,26 @@ server <- function(input, output, session) {
       }
       paste(s, label)
     }
-    ggplot(result$data, aes(x = x, y = y)) +
-      geom_point(aes(color = market_period), size = 2.5, alpha = 0.8) +
+    format_corr_value <- function(z, variable) {
+      if (variable %in% hold_vars) {
+        suffix <- if (result$view == "change") " pp" else "%"
+        paste0(formatC(z, format = "f", digits = 2, big.mark = ","), suffix)
+      } else if (result$view == "yoy") {
+        paste0(formatC(z, format = "f", digits = 2, big.mark = ","), "%")
+      } else {
+        paste0("$", formatC(z, format = "f", digits = 2, big.mark = ","))
+      }
+    }
+    chart_data <- result$data |>
+      mutate(hover_text = paste0(
+        "Period: ", vapply(period, format_period, character(1), mode = result$period),
+        "<br>", result$state_x, ": ", format_corr_value(x, result$var_x),
+        "<br>", result$state_y, ": ", format_corr_value(y, result$var_y),
+        "<br>", market_period
+      ))
+    chart <- ggplot(chart_data, aes(x = x, y = y)) +
+      geom_point(aes(color = market_period, text = hover_text),
+                 size = 2.5, alpha = 0.8) +
       geom_smooth(method = "lm", se = FALSE, color = "black") +
       scale_color_manual(
         values = c("Neither state mobile-active" = "gray50",
@@ -837,6 +1605,9 @@ server <- function(input, output, session) {
            x = axis_label(result$state_x, result$var_x),
            y = axis_label(result$state_y, result$var_y)) +
       theme_gray()
+    plotly::ggplotly(chart, tooltip = "text") |>
+      plotly::layout(hovermode = "closest") |>
+      plotly::config(displaylogo = FALSE, responsive = TRUE)
   })
 
   output$corr_result <- renderText({
