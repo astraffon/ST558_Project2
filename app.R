@@ -78,6 +78,37 @@ extra_plot_theme <- theme_minimal(base_size = 16) +
     plot.caption = element_text(size = 12)
   )
 
+# Keep zero visible on every quantitative axis in the interactive charts.
+# The breaks function retains ordinary tick marks and explicitly includes zero.
+# Negative observations and existing dollar/percentage units are preserved.
+zero_axis_breaks <- function(limits) {
+  ordinary <- scales::breaks_extended(n = 5)(limits)
+  ordinary <- ordinary[is.finite(ordinary)]
+  sort(unique(c(ordinary, 0)))
+}
+
+# Add a restrained zero reference to quantitative Y axes. After coord_flip(),
+# the same reference appears vertically on horizontal bar charts.
+show_zero_reference <- function(chart, numeric_x = FALSE) {
+  chart <- chart +
+    ggplot2::expand_limits(y = 0) +
+    ggplot2::geom_hline(
+      yintercept = 0, color = "grey65", linewidth = 0.35,
+      inherit.aes = FALSE, show.legend = FALSE
+    )
+
+  # Distribution plots have numerical values on X and frequency/density on Y.
+  if (isTRUE(numeric_x)) {
+    chart <- chart +
+      ggplot2::expand_limits(x = 0) +
+      ggplot2::geom_vline(
+        xintercept = 0, color = "grey75", linewidth = 0.3,
+        inherit.aes = FALSE, show.legend = FALSE
+      )
+  }
+  chart
+}
+
 # Step 2C: Examples of earlier static reports for the About tab
 # Shiny serves these images from the www/images folder.
 static_report_examples <- list(
@@ -1032,6 +1063,7 @@ server <- function(input, output, session) {
                aes(x = month, y = .data[[variable]] / scale_divisor,
                    color = state, group = state, text = hover_text)) +
           geom_line(linewidth = 0.9) +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           scale_x_date(date_breaks = "6 months", date_labels = "%b %Y") +
           labs(
             title = paste("Monthly Sports Betting", label, "by State"),
@@ -1054,6 +1086,8 @@ server <- function(input, output, session) {
         ggplot(plot_data, aes(x = hold_total)) +
           geom_histogram(binwidth = 2, boundary = 0,
                          color = "white", fill = "grey40") +
+          scale_x_continuous(breaks = zero_axis_breaks) +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           labs(
             title = "Distribution of Monthly Sports Betting Hold Percentages",
             subtitle = "Each observation represents one state-month",
@@ -1090,7 +1124,10 @@ server <- function(input, output, session) {
                    text = hover_text)) +
           geom_col(fill = "steelblue") +
           coord_flip() +
-          scale_y_continuous(labels = scales::label_dollar(accuracy = 1)) +
+          scale_y_continuous(
+            breaks = zero_axis_breaks,
+            labels = scales::label_dollar(accuracy = 1)
+          ) +
           labs(
             title = paste("Sports Betting", metric_label, "Per Capita by State"),
             subtitle = paste(
@@ -1124,6 +1161,7 @@ server <- function(input, output, session) {
                aes(x = month, y = cumulative_handle / 1e9,
                    fill = state, text = hover_text)) +
           geom_area() +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           scale_x_date(
             date_breaks = if (as.numeric(diff(range(plot_data$month))) > 365 * 3)
               "1 year" else "6 months",
@@ -1166,7 +1204,10 @@ server <- function(input, output, session) {
             date_labels = "%b %Y",
             limits = range(plot_data$month)
           ) +
-          scale_y_continuous(labels = scales::label_number(suffix = "%")) +
+          scale_y_continuous(
+            breaks = zero_axis_breaks,
+            labels = scales::label_number(suffix = "%")
+          ) +
           labs(
             title = "Combined Monthly Sports Betting Hold",
             subtitle = "Selected states; revenue divided by handle",
@@ -1188,6 +1229,7 @@ server <- function(input, output, session) {
                aes(x = reporting_year, y = hold_total)) +
           geom_boxplot(fill = "lightblue", outlier.shape = NA) +
           geom_jitter(width = 0.12, alpha = 0.4, size = 1) +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           facet_wrap(~ state, ncol = 4) +
           labs(
             title = "Monthly Hold Percentage by State and Year",
@@ -1218,7 +1260,10 @@ server <- function(input, output, session) {
                    text = hover_text)) +
           geom_col() +
           coord_flip() +
-          scale_y_continuous(labels = scales::label_number(suffix = "%")) +
+          scale_y_continuous(
+            breaks = zero_axis_breaks,
+            labels = scales::label_number(suffix = "%")
+          ) +
           labs(
             title = paste("Mobile and Retail Handle Share -", input$graph_channel_year),
             subtitle = "Channel totals divided by reported total handle",
@@ -1240,6 +1285,7 @@ server <- function(input, output, session) {
         ggplot(counts, aes(x = reporting_year, y = Observations,
                            fill = channel_status, text = hover_text)) +
           geom_col(position = "dodge") +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           labs(
             title = "Monthly Observations by Year and Channel Activity",
             x = "Reporting Year", y = "Number of State-Months",
@@ -1265,6 +1311,8 @@ server <- function(input, output, session) {
         ggplot(finite_data, aes(x = .data[[var]])) +
           geom_histogram(bins = input$graph_bins, fill = "#4472B4",
                          color = "white") +
+          scale_x_continuous(breaks = zero_axis_breaks) +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           labs(title = paste("Distribution of", label),
                x = label, y = "Number of State-Months") +
           extra_plot_theme
@@ -1277,6 +1325,7 @@ server <- function(input, output, session) {
                aes(x = reporting_year, y = .data[[var]],
                    fill = reporting_year)) +
           geom_boxplot(outlier.alpha = 0.35) +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           guides(fill = "none") +
           labs(title = paste(label, "by Reporting Year"),
                x = "Reporting Year", y = label) +
@@ -1298,6 +1347,8 @@ server <- function(input, output, session) {
                aes(x = .data[[var]], color = reporting_year,
                    group = reporting_year)) +
           geom_density(linewidth = 0.9) +
+          scale_x_continuous(breaks = zero_axis_breaks) +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           labs(title = paste("Distribution of", label, "by Year"),
                x = label, y = "Density", color = "Reporting Year") +
           extra_plot_theme
@@ -1316,6 +1367,8 @@ server <- function(input, output, session) {
         ggplot(finite_data, aes(x = .data[[var]])) +
           geom_histogram(bins = input$graph_bins, fill = "#4472B4",
                          color = "white") +
+          scale_x_continuous(breaks = zero_axis_breaks) +
+          scale_y_continuous(breaks = zero_axis_breaks) +
           facet_wrap(stats::as.formula(paste("~", input$graph_facet)),
                      scales = "free_y", ncol = 3) +
           labs(title = paste("Distribution of", label, "by",
@@ -1374,6 +1427,8 @@ server <- function(input, output, session) {
                    fill = amount, text = hover_text)) +
           geom_tile(color = "white", linewidth = 0.25) +
           scale_fill_viridis_c(
+            limits = range(c(0, heat_data$amount[is.finite(heat_data$amount)])),
+            breaks = zero_axis_breaks,
             labels = scales::label_number(
               scale_cut = scales::cut_short_scale(),
               suffix = if (var %in% hold_vars) "%" else ""
@@ -1393,6 +1448,13 @@ server <- function(input, output, session) {
   # Keep ggplot calculations in extra_plot_gg() and use Plotly only for display.
   output$extra_plot <- renderPlotly({
     chart <- extra_plot_gg()
+    if (input$graph_type != "heatmap") {
+      chart <- show_zero_reference(
+        chart,
+        numeric_x = input$graph_type %in%
+          c("hold_hist", "histogram", "density", "facets")
+      )
+    }
     custom_hover_types <- c(
       "per_capita", "monthly_handle", "monthly_revenue", "cum_handle",
       "national_hold", "channel_share", "bar", "heatmap"
@@ -1598,13 +1660,20 @@ server <- function(input, output, session) {
                    "Both states mobile-active" = "#0072B2"),
         name = "Market Period"
       ) +
-      scale_x_continuous(labels = scales::label_number(scale_cut = scales::cut_short_scale())) +
-      scale_y_continuous(labels = scales::label_number(scale_cut = scales::cut_short_scale())) +
+      scale_x_continuous(
+        breaks = zero_axis_breaks,
+        labels = scales::label_number(scale_cut = scales::cut_short_scale())
+      ) +
+      scale_y_continuous(
+        breaks = zero_axis_breaks,
+        labels = scales::label_number(scale_cut = scales::cut_short_scale())
+      ) +
       labs(title = paste(period_labels[[result$period]], "Correlation"),
            subtitle = paste(result$state_x, "vs", result$state_y),
            x = axis_label(result$state_x, result$var_x),
            y = axis_label(result$state_y, result$var_y)) +
       theme_gray()
+    chart <- show_zero_reference(chart, numeric_x = TRUE)
     plotly::ggplotly(chart, tooltip = "text") |>
       plotly::layout(hovermode = "closest") |>
       plotly::config(displaylogo = FALSE, responsive = TRUE)
@@ -1738,13 +1807,18 @@ server <- function(input, output, session) {
 
     if (is_dollars) {
       chart <- chart + scale_y_continuous(
+        breaks = zero_axis_breaks,
         labels = scales::label_number(prefix = "$", scale_cut = scales::cut_short_scale()))
     } else {
-      chart <- chart + scale_y_continuous(labels = scales::label_number(suffix = suffix))
+      chart <- chart + scale_y_continuous(
+        breaks = zero_axis_breaks,
+        labels = scales::label_number(suffix = suffix)
+      )
     }
     if (result$display == "Separate panels") {
       chart <- chart + facet_wrap(~state, scales = "free_y") + guides(color = "none")
     }
+    chart <- show_zero_reference(chart)
     plotly::ggplotly(chart, tooltip = "text") |>
       plotly::layout(hovermode = "closest") |>
       plotly::config(displaylogo = FALSE)
