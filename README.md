@@ -73,7 +73,7 @@ The `exploration.R` script contains the preliminary static exploration, includin
 
 - **Course:** NC State ST 558 — Data Science for Statisticians
 - **GitHub repository:** https://github.com/astraffon/ST558_Project2
-- **Live Shiny app:** Link to be added after deployment to shinyapps.io
+- **Live Shiny Application:** https://igaminganalyst.shinyapps.io/ST558_Project2/
 - **Related website:** https://www.igaminganalyst.com/
 
 This application is intended for descriptive exploration and should not be treated as a substitute for the underlying official state regulatory reports.
